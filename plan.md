@@ -1,15 +1,19 @@
 # Plan: shared knowledge base + agent project management
 
-Status: rev 6 · 2026-08-24 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 6
-adds the module layer (§22.1): modules contribute search targets, tools and
-console forms, a form submission creates a ticket, and aven is the module
-language. Rev 5 added the cost dimension the plan had ignored and measured it
-rather than assuming it: context depth costs money, caching changes the shape,
-and which pattern wins is empirical (§16.3). Rev 4 settled the two open naming
-questions and renamed throughout to plain terminology (§2
-principle 8). Rev 3 folded in the second adversarial pass (leak-gate
-architecture, pm-repo concurrency, curation snapshotting, index scaling,
-provenance laundering) and Dave's responses; decisions are recorded in §25.
+Status: rev 7 · 2026-08-26 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 7
+answers the aven capability question against the source rather than the roadmap
+and turns it into decision 34: grants are already per-invocation, scoping within
+a grant is aven-side work that precedes P10b. The decisions still open before
+implementation begins are held on their own page, linked from §0. Rev 6 added
+the module layer (§22.1): modules contribute search targets, tools and console
+forms, a form submission creates a ticket, and aven is the module language. Rev
+5 added the cost dimension the plan had ignored and measured it rather than
+assuming it: context depth costs money, caching changes the shape, and which
+pattern wins is empirical (§16.3). Rev 4 settled the two open naming questions
+and renamed throughout to plain terminology (§2 principle 8). Rev 3 folded in
+the second adversarial pass (leak-gate architecture, pm-repo concurrency,
+curation snapshotting, index scaling, provenance laundering) and Dave's
+responses; decisions are recorded in §25.
 
 ## 0. How to review this
 
@@ -20,6 +24,12 @@ are planned together because a ticket, a review finding and a durable lesson are
 all the same kind of object with different `type` fields.
 
 Nothing here is built yet. Four repos are named but do not exist.
+
+**Decisions still open before implementation** — the calls that are cheap now
+and expensive later — are held on their own page, with options, tradeoffs and a
+recommendation each:
+<https://claude.ai/code/artifact/bf550305-cb81-42e4-b8b5-06b628bf3c53>. It is
+updated in place; answered questions stay on it with their answers.
 
 What I would most value being challenged is listed in §25. If a diagnosis in
 here is wrong, say so and propose the better shape rather than working around it
@@ -1078,12 +1088,12 @@ it is **declaration rather than code**:
 | **Tools**    | Verbs an agent calls, which execute those targets    |
 | **Forms**    | A field schema the console renders and submits (§17) |
 
-**A form submission creates a ticket.** It does not execute inline. The ticket is
-already the unit of work, `pm dispatch` already runs it, and results already land
-as artefacts that feed curation — so the console needs no execution semantics of
-its own, and a fast check simply completes before anyone looks at it. Forms are
-therefore not a special case: they are structured ticket creation, which the
-console needs anyway, generalised.
+**A form submission creates a ticket.** It does not execute inline. The ticket
+is already the unit of work, `pm dispatch` already runs it, and results already
+land as artefacts that feed curation — so the console needs no execution
+semantics of its own, and a fast check simply completes before anyone looks at
+it. Forms are therefore not a special case: they are structured ticket creation,
+which the console needs anyway, generalised.
 
 **Namespacing is settled now**, because collisions cost nothing to prevent and a
 lot to unwind: every module-contributed target, tool, form and note type is
@@ -1092,18 +1102,18 @@ qualified by its module's name.
 **A module is where the leak gate leaks (§7).** It runs with Dave's credentials,
 can see kb-priv, and can talk to the network — so a module that reads a private
 note and posts it to an availability API walks straight around the in-process
-denylist scan every other write path takes. `cargo-*`-level trust — you installed
-it, you own the consequences — is defensible for modules Dave writes and not for
-modules other people write. That is the constraint that decides the module
-language.
+denylist scan every other write path takes. `cargo-*`-level trust — you
+installed it, you own the consequences — is defensible for modules Dave writes
+and not for modules other people write. That is the constraint that decides the
+module language.
 
 #### The module language is aven
 
 Modules must express targets, predicates over responses, and field schemas. The
-cheap answer is TOML plus a small expression string (`available_when =
-"status == 404"`), which means inventing an expression language badly — the road
-that produced Starlark, CUE, Rego, Dhall and HCL, each because a config format
-grew a brain one feature at a time.
+cheap answer is TOML plus a small expression string
+(`available_when = "status == 404"`), which means inventing an expression
+language badly — the road that produced Starlark, CUE, Rego, Dhall and HCL, each
+because a config format grew a brain one feature at a time.
 
 **aven fits this slot better than a home-grown mini-language, and better than it
 first appears.** It describes itself as a typed glue language with a type-safe
@@ -1120,11 +1130,11 @@ behind it.
 The security argument is the strongest one. A host-provided capability boundary
 is precisely the answer to the trust problem above: a module receives the
 capabilities the host hands it and nothing else, so "may this module reach
-kb-priv, and may it reach the network" becomes a host decision rather than an act
-of faith. A subprocess module cannot offer that; a sandboxed evaluator can.
+kb-priv, and may it reach the network" becomes a host decision rather than an
+act of faith. A subprocess module cannot offer that; a sandboxed evaluator can.
 
-**Sequencing keeps aven off the critical path.** P1–P4 use a closed, built-in set
-of validation rules and no expression language at all, so §23's "P1 before
+**Sequencing keeps aven off the critical path.** P1–P4 use a closed, built-in
+set of validation rules and no expression language at all, so §23's "P1 before
 everything" holds and lint never waits on a language under reconstruction. aven
 arrives at P10b with modules — the first point at which anything genuinely needs
 open-ended third-party expression. If it is not ready then, TOML plus a fixed
@@ -1135,8 +1145,10 @@ a claim about its current state:
 
 - **Per-invocation capability scoping** — the host granting one module
   HTTP-to-crates.io and another no network at all, rather than one global
-  platform. This decides whether third-party modules are safe, and is the first
-  thing worth checking.
+  platform. This decides whether third-party modules are safe. _Checked against
+  the source; see decision 34._ Granting is already per-`Host`, so the
+  per-invocation half holds; scoping **within** a capability is the gap, and
+  closing it is aven-side work that must precede P10b.
 - **Bounded evaluation** — a module expression that loops forever is a denial of
   service against the daemon. The existing recursion-depth-guard work is the
   right shape.
@@ -1146,9 +1158,9 @@ a claim about its current state:
   `aven-eval` and `aven-host` by path.
 
 Inadequacies found here are worth finding rather than worth avoiding: a module
-system is a glue problem and aven is a glue language, so if it cannot yet express
-"declare some HTTP targets, read the status, return a record", that is a small
-and well-aimed gap.
+system is a glue problem and aven is a glue language, so if it cannot yet
+express "declare some HTTP targets, read the status, return a record", that is a
+small and well-aimed gap.
 
 ## 23. Phases
 
@@ -1228,16 +1240,16 @@ Hard ordering constraints:
   rather than UI code; P5 ships read-only and the write path lands with the
   daemon at P10.
 - **A module is a hole in the leak gate.** It runs with Dave's credentials, can
-  read kb-priv, and can reach the network, walking around the in-process scan
-  §7 relies on. _Mitigate:_ the host capability boundary (§22.1) is the
-  mechanism rather than trust in module authors — a module gets what the host
-  grants and nothing else, and one asking for kb-priv reads plus network is
-  refused rather than reviewed.
+  read kb-priv, and can reach the network, walking around the in-process scan §7
+  relies on. _Mitigate:_ the host capability boundary (§22.1) is the mechanism
+  rather than trust in module authors — a module gets what the host grants and
+  nothing else, and one asking for kb-priv reads plus network is refused rather
+  than reviewed.
 - **`lab` gains a dependency on a language under reconstruction.** aven is
   experimental and its embedding API will move. _Mitigate:_ sequencing — P1–P4
   use a closed built-in rule set, so aven gates only the module layer (P10b) and
-  never lint; TOML with a fixed predicate set remains the fallback if aven is not
-  ready.
+  never lint; TOML with a fixed predicate set remains the fallback if aven is
+  not ready.
 - **Public history is permanent.** _Mitigate:_ small reviewed promotion batches;
   curation may never force-push or rewrite public history.
 - **The system raises output without raising review capacity.** The stated
@@ -1367,12 +1379,12 @@ Resolved during the rev-6 review:
 
 30. **A module contributes targets, tools and forms, and is mostly declaration
     rather than code** (§22.1). The lookup half of name-checking stops being
-    agent judgment, which is §2 principle 1 pointed outward. The escape hatch for
-    awkward targets is the module language, not an arbitrary subprocess.
+    agent judgment, which is §2 principle 1 pointed outward. The escape hatch
+    for awkward targets is the module language, not an arbitrary subprocess.
 31. **A form submission creates a ticket** rather than executing inline (§17,
     §22.1). The console grows no execution semantics of its own, results land as
-    artefacts that feed curation, and every lookup leaves a dated record for §6's
-    `asserted` model.
+    artefacts that feed curation, and every lookup leaves a dated record for
+    §6's `asserted` model.
 32. **Schema handling is general at P4, not a ticket-specific validator** (§22,
     §23 P4). A schema describes fields, a validator checks a record, a renderer
     draws a form. The same work if decided before P4 is written; parallel
@@ -1402,14 +1414,24 @@ Still open — the plan proceeds on these assumptions and tests them:
    counterfactuals like tighter briefs or smaller scope per dispatch. Parallel
    experiments are needed, waiting for `pm dispatch` (P10).
    > Dave: We'll need parallel experiments — wait until we have things built and
-   > run the experiments then.
-4. **Can `aven-host` scope capabilities per invocation?** The module trust model
-   (§22.1) rests on the host granting one module HTTP-to-crates.io and another no
-   network at all. If capabilities are global to the platform rather than
-   per-invocation, third-party modules fall back to `cargo-*`-level trust and the
-   security argument for aven weakens considerably. Unlike the questions above
-   this one needs no experiment — it is answerable from aven's roadmap, and it is
-   the first thing to check.
+   > run the experiments then. _(Question 4, on aven capability scoping, was
+   > answered by inspection and is now decision 34.)_
+
+Resolved during the rev-7 review:
+
+34. **Capability grants are per-invocation already; scoping within a capability
+    is aven-side work that precedes P10b** (§22.1). `Host::new()` is empty and
+    every capability is opt-in, so a module invocation gets its own `Host`
+    carrying only its grants — and a module importing an ungranted capability is
+    refused with a check-time diagnostic naming the missing capability, before
+    it runs. What does not exist is scoping _within_ a grant: `register_http`
+    allows every URL and `register_files` the whole filesystem, so "crates.io
+    only, no filesystem" is inexpressible. Both are one interception point each
+    and additive — scoped registration variants taking a policy, touching
+    neither the checker nor the language. Since aven is ours to improve, the
+    answer is to build it rather than weaken the trust model; the path allowlist
+    must canonicalise before checking, or `..` and symlinks walk straight out of
+    it.
 
 ---
 
