@@ -1,7 +1,10 @@
 # Plan: shared knowledge base + agent project management
 
-Status: rev 7 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 7
-clears the decks for implementation: the aven capability question is answered
+Status: rev 8 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 8
+makes schema migration a tool rather than a chore: the schema is expected to stay
+fluid through P8, so `kb lint --fix` and `kb migrate` are P1 scope and a schema
+change is applied by one command across every note (decision 41). Rev 7
+cleared the decks for implementation: the aven capability question is answered
 against the source rather than the roadmap (decision 34 — grants are already
 per-invocation, scoping within a grant is aven-side work that precedes P10b), and
 the six calls standing between rev 6 and the first line of code are settled as
@@ -1060,9 +1063,27 @@ that way at P4, console ticket creation and module forms (§22.1) both come free
 built as "validate a ticket", each needs parallel machinery later. It is the
 same work either way, and only cheap if it is decided before P4 is written.
 
+**The schema will move for the whole of P0–P8, so migration is a tool rather
+than a chore.** Fields will be renamed, added, split and dropped as the first
+hundred notes teach what the schema got wrong, and every one of those changes
+would otherwise mean opening every note by hand — which is exactly the work §2
+principle 1 says belongs in a script. So `kb lint` ships with `--fix` from P1,
+and a schema change is expressed as a migration the tool applies across every
+registered source at once. Two consequences worth stating: a rule is only worth
+adding to the schema if its violation can be described precisely enough to
+detect, which is a useful discipline on the schema itself; and rules divide into
+the mechanically fixable (a missing default, a renamed field, a link that needs
+its source prefix) and the ones needing judgment (a missing `source:`), so lint
+reports the second kind and repairs the first rather than pretending both are
+errors of the same kind. This is the other half of the argument for the schema
+being data (decision 37): autofix against hardcoded rules means writing a
+bespoke migration each time, where autofix against a described schema can derive
+most of them.
+
 ```sh
 # knowledge base
-kb lint                            # schema, links, orphans, index sync
+kb lint [--fix] [--explain]        # schema, links, orphans, index sync
+kb migrate [--dry-run]             # apply a schema change across every note
 kb index [--incremental]           # rebuild qmd collections from registry
 kb search QUERY [--json]           # hybrid retrieval
 kb capture [--from FILE]           # write path: dedup gate, provenance, lint
@@ -1190,8 +1211,8 @@ the top pain point and depends only on ticket files existing.
 
 | Phase | Track | Work                                                                                                                                                                                                                                                      | Done when                                                                                      |
 | ----- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| P0    | KB    | Create the vault repos (kb **private until P8**, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`, seed `kb-priv/policy/denylist.txt` from terms seen while migrating. No automation.             | 15 notes pass lint; the index reads usefully; the denylist has real terms in it                |
-| P1    | KB    | The tools workspace repo; `kb lint` + index generation, with the schema as a data file and a closed built-in predicate set (§22) — `SCHEMA.md` becomes generated. The first script.                                                                       | Lint runs in pre-commit; CI checks index freshness rather than writing it                      |
+| P0    | KB    | Create the vault repos (kb **private until P8**, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`, seed `kb-priv/policy/denylist.txt` from terms seen while migrating. No automation. | The index reads usefully and the denylist has real terms in it; the notes become P1's lint fixture, checked retroactively |
+| P1    | KB    | The tools workspace repo; `kb lint --fix`, `kb migrate` and index generation, with the schema as a data file and a closed built-in predicate set (§22) — `SCHEMA.md` becomes generated. Autofix and migration are P1 scope, not later polish. | A schema change is applied across every note by one command, not by hand |
 | P2    | KB    | qmd, registry, collections, eval fixture.                                                                                                                                                                                                                 | `kb bench` runs; hybrid measured against keyword-only                                          |
 | P3    | KB    | Surfacing: index pointers, prompt-submit hook with relevance floor, `kb` skill.                                                                                                                                                                           | A session surfaces a forgotten note                                                            |
 | P4    | PM    | Ticket schema, `pm new/show/set/move/list/lint`, state machine. Schema handling built as a general mechanism — validator plus form renderer — not a ticket-specific validator (§22). Tickets by hand only.                                                | A ticket cannot enter an invalid state, and the same schema code validates a non-ticket record |
@@ -1219,7 +1240,9 @@ Hard ordering constraints:
   what they create. The module layer is separable: it can slip past P11–P13
   without blocking them.
 - **P1 before everything.** The lint is what prevents drift, and drift is
-  unrecoverable once 500 notes exist.
+  unrecoverable once 500 notes exist — but it is `--fix` and `migrate` that make
+  the schema safe to keep changing while the corpus grows, which is why they are
+  in P1 and not after it (decision 41).
 
 ## 24. Risks
 
@@ -1505,6 +1528,20 @@ Resolved during the rev-7 review:
     itself writes, so switching costs a migration and breaks writes the system
     does not control; TOML is right for hand-edited config with no document body.
     Two parsers is not a burden worth a migration to avoid.
+41. **The schema is expected to stay fluid through P8, so `kb lint --fix` and
+    `kb migrate` are P1 scope rather than later polish** (§22, §23 P1). Dave's
+    call, and it inverts how the phase reads: P1's product is not a checker but a
+    schema-change tool that happens to check. The first hundred notes will teach
+    what the schema got wrong, and a rename that means opening every note by hand
+    is the tax that stops the schema improving — the fluidity is only affordable
+    if migration is a command. Two things follow. A rule earns its place in the
+    schema only if its violation is describable precisely enough to detect, which
+    disciplines the schema itself; and lint sorts rules into the mechanically
+    repairable and the ones needing judgment, fixing the first and reporting the
+    second rather than treating them alike. This is also the second and stronger
+    argument for decision 37: autofix against hardcoded rules means hand-writing
+    each migration, where autofix against a described schema derives most of
+    them.
 
 ---
 
