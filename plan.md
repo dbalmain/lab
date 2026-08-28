@@ -1,7 +1,11 @@
 # Plan: shared knowledge base + agent project management
 
-Status: rev 8 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 8
-makes schema migration a tool rather than a chore: the schema is expected to stay
+Status: rev 9 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 9
+is the first written against real content: P0's twenty notes exist, and writing
+them removed two schema fields as derivable (decision 42) and replaced the
+tombstone with a link index spanning every source, which yields backlinks and
+link-weighted retrieval from the same structure (decision 43). Rev 8
+made schema migration a tool rather than a chore: the schema is expected to stay
 fluid through P8, so `kb lint --fix` and `kb migrate` are P1 scope and a schema
 change is applied by one command across every note (decision 41). Rev 7
 cleared the decks for implementation: the aven capability question is answered
@@ -386,23 +390,28 @@ proven by hand on real content before any machinery assumes it.
 
 ```yaml
 ---
-name: monitors-self-match
 description:
   A watcher that greps for a pattern present in its own command line matches
   itself and spins forever.
 type: lesson # lesson | reference | decision | howto | client | task | finding | position
 scope: global # global | project:clex | client:acme
-visibility: public # public | private -- DEFAULT private
 confidence: high # high | medium | low
 asserted: 2026-07-22 # when this was last known true
 source: # provenance -- no note without it
   - clex/.ai/grok-monitor-loop.md
   - agent-playbook.md
-triggers: # when this note matters, in Dave's words
-  - "writing a process monitor"
+triggers: # when this note matters, imperative, in Dave's words
+  - "write a process monitor"
   - "pgrep"
 ---
 ```
+
+**Nothing is stored that can be derived.** A note's **name** is its filename
+without the extension — searching names is the retrieval tool's job, not a
+duplicated field's — and its **visibility** is the visibility of the source it
+lives in, per that source's registry `publication`. A `visibility: private`
+marker inside a public repo would describe a leak that had already happened
+rather than prevent one. Both fields were in rev 6 and are gone.
 
 Body: the fact, then `**Why:**`, then `**How to apply:**`. Link with `[[name]]`.
 
@@ -412,8 +421,9 @@ Rules:
 - **Edit over create.** Before writing, search for the note this should have
   been an edit to. Enforced on the write path (§9), not by good intentions.
 - **No note without provenance.**
-- **Private is the default.** Publication is an explicit, reviewed act on one
-  note. There is no bulk promotion.
+- **Private is the default**, by living in a private source. Publication is an
+  explicit, reviewed act on one note — a file move, not a field edit — and there
+  is no bulk promotion.
 - **`asserted` is not decoration.** A lesson asserting tool behaviour older than
   ~90 days is flagged for recheck. Rechecking is grok breadth work (§20): it
   gathers the evidence and escalates to needs-you only on contradiction — the
@@ -435,6 +445,15 @@ Rules:
   visibility rule it replaces: a private note's name inside a public link is
   itself a leak, whether the private thing is kb-priv or a client's repo.
   Private sources may link both ways.
+- **Every link is indexed in kb-priv, and a move rewrites its inbound links.**
+  The index spans all registered sources, so promoting or renaming a note updates
+  what points at it rather than leaving a redirect behind. It is also what makes
+  backlinks and link-weighted retrieval possible, neither of which a per-note
+  redirect could support. A note being promoted is usually new and has few
+  inbound links; the index is what makes that a fact rather than a hope. The
+  index lives in kb-priv because it necessarily names private notes, and must be
+  present for a promotion to proceed — the same fail-closed coupling as the
+  denylist (§24).
 
 ## 7. The public/private boundary
 
@@ -1301,11 +1320,15 @@ Hard ordering constraints:
   after that; curation may never force-push or rewrite public history.
 - **Promotion breaks inbound cross-source links.** Moving a note from a project
   into kb invalidates every `[[project:name]]` pointing at it, in repos the
-  promoting checkout may not have. _Mitigate:_ promotion leaves a tombstone in
-  the origin — a stub whose frontmatter carries `moved_to: kb:<name>` and no
-  body — so old links resolve through it and lint can rewrite lazily wherever it
-  next sees both sources. A tombstone is cheap; a cross-repo rewrite of repos
-  you do not have is not possible.
+  promoting checkout may not have. _Mitigate:_ a link index in kb-priv spanning
+  every registered source (§6), so a move knows exactly what points at the note
+  and can rewrite it. The index earns its keep twice over — backlinks and
+  link-weighted retrieval come from the same structure — and it turns an
+  unknowable blast radius into a listed one. Where a source is not checked out
+  the rewrite cannot happen, but the index still names what was missed, which is
+  the difference between a deferred fix and a silent break. _Open:_ whether the
+  rewrite runs eagerly at promotion time or is applied by each source's next
+  `lint --fix` (§25 open question 5).
 - **The system raises output without raising review capacity.** The stated
   bottleneck is Dave. _Mitigate:_ the digest, the ledger and Claude-as-first-
   reviewer are load-bearing, not conveniences; the dashboard sorts by needs-you;
@@ -1468,8 +1491,21 @@ Still open — the plan proceeds on these assumptions and tests them:
    counterfactuals like tighter briefs or smaller scope per dispatch. Parallel
    experiments are needed, waiting for `pm dispatch` (P10).
    > Dave: We'll need parallel experiments — wait until we have things built and
-   > run the experiments then. _(Question 4, on aven capability scoping, was
-   > answered by inspection and is now decision 34.)_
+   > run the experiments then.
+
+_(Question 4, on aven capability scoping, was answered by inspection and is now
+decision 34.)_
+
+5. **Does a move rewrite inbound links eagerly at promotion time, or lazily via
+   each source's next `lint --fix`?** Decision 43 settles that the index exists
+   and that a move updates what points at the note; it does not settle when.
+   Eager keeps the corpus consistent at every instant, but writes into repos the
+   promoter was not working in — the same "a scheduled run and Dave in one
+   working tree" problem §11 avoided by having curation read snapshots, and it
+   requires those trees to be clean. Lazy writes only to the repo being linted,
+   rides the autofix machinery decision 41 already requires, and leaves a window
+   where a link is known-stale but unfixed — which the index makes visible rather
+   than silent.
 
 Resolved during the rev-7 review:
 
@@ -1542,6 +1578,24 @@ Resolved during the rev-7 review:
     argument for decision 37: autofix against hardcoded rules means hand-writing
     each migration, where autofix against a described schema derives most of
     them.
+42. **The schema stores nothing derivable — `name` and `visibility` are gone**
+    (§6). Dave's call. A note's name is its filename, and searching filenames is
+    the retrieval tool's job rather than a duplicated field's; its visibility is
+    its source's, so a `visibility: private` marker inside a public repo would
+    describe a leak that had already happened rather than prevent one. Promotion
+    becomes a file move instead of a field edit, which is also the honest
+    description of what it always was.
+43. **Every link is indexed in kb-priv, and a move rewrites its inbound links**
+    (§6, §24). Dave's call, replacing rev 7's tombstone. The tombstone was the
+    cheap answer to "promotion breaks inbound links" and bought only that; an
+    index of every link across every registered source answers the same question
+    and yields backlinks and link-weighted retrieval from the same structure. It
+    also changes the character of the problem: a tombstone is a redirect left
+    where a note used to be, while the index knows what points at a note before
+    it moves, turning an unknowable blast radius into a listed one. It lives in
+    kb-priv because it necessarily names private notes, and it must be present
+    for a promotion to proceed — the same fail-closed coupling the denylist
+    already has.
 
 ---
 
