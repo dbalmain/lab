@@ -1,10 +1,13 @@
 # Plan: shared knowledge base + agent project management
 
-Status: rev 7 · 2026-08-26 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 7
-answers the aven capability question against the source rather than the roadmap
-and turns it into decision 34: grants are already per-invocation, scoping within
-a grant is aven-side work that precedes P10b. The decisions still open before
-implementation begins are held on their own page, linked from §0. Rev 6 added
+Status: rev 7 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 7
+clears the decks for implementation: the aven capability question is answered
+against the source rather than the roadmap (decision 34 — grants are already
+per-invocation, scoping within a grant is aven-side work that precedes P10b), and
+the six calls standing between rev 6 and the first line of code are settled as
+decisions 35–40. The largest of them reshapes §6 — the note namespace is one per
+registered source rather than one per vault, because every project keeps its own
+tool-specific knowledge alongside what it promotes. Rev 6 added
 the module layer (§22.1): modules contribute search targets, tools and console
 forms, a form submission creates a ticket, and aven is the module language. Rev
 5 added the cost dimension the plan had ignored and measured it rather than
@@ -25,9 +28,9 @@ all the same kind of object with different `type` fields.
 
 Nothing here is built yet. Four repos are named but do not exist.
 
-**Decisions still open before implementation** — the calls that are cheap now
-and expensive later — are held on their own page, with options, tradeoffs and a
-recommendation each:
+**The decisions taken before implementation** — the calls that were cheap then
+and expensive later — are held on their own page with the options and tradeoffs
+each was weighed against, so the reasoning survives the summary of it here:
 <https://claude.ai/code/artifact/bf550305-cb81-42e4-b8b5-06b628bf3c53>. It is
 updated in place; answered questions stay on it with their answers.
 
@@ -235,11 +238,15 @@ nothing.** A client machine runs `git clone github.com/dbalmain/kb` and gets
 everything it is permitted to have — no submodule to init, no advertised private
 URL, nothing to configure.
 
-Hosting: kb and the tools repo are public on GitHub. kb-priv and pm are GitHub
-private repos — acceptable for their current sensitivity (Dave's call; revisit
-if genuinely sensitive client material ever lands). Redundancy comes from clones
-on two always-on tailscale-reachable machines at different sites, not from a
-second forge.
+Hosting: the tools repo is public on GitHub from the start. **kb is created
+private and flips to public at P8**, when the denylist, the pre-push gate and
+the tripwire CI exist; the flip runs the same one-time full-tree-and-history
+scan §5 specifies for any repo opening late. Notes are written as though public
+from note one — the private window is an undo, not a licence. kb-priv and pm are
+GitHub private repos permanently — acceptable for their current sensitivity
+(Dave's call; revisit if genuinely sensitive client material ever lands).
+Redundancy comes from clones on two always-on tailscale-reachable machines at
+different sites, not from a second forge.
 
 Rejected: submodules in either direction. Private-inside-public advertises the
 private URL in `.gitmodules` and breaks every client clone;
@@ -408,10 +415,23 @@ Rules:
   ~90 days is flagged for recheck. Rechecking is grok breadth work (§20): it
   gathers the evidence and escalates to needs-you only on contradiction — the
   flag must not become another queue for Dave.
-- **Links resolve within the visibility boundary.** A kb note may link only kb
-  notes — a private note's name in a public link is itself a leak, and `kb lint`
-  on a lone public clone must be able to resolve every link. kb-priv notes may
-  link both ways.
+- **Names are unique per source, and cross-source links are prefixed.** The
+  namespace is not two vaults but one per registered source (§5): kb, kb-priv,
+  pm and every project repo that declares `durable`. `[[name]]` means within
+  this source; `[[source:name]]` crosses, where `source` is the registry name —
+  `[[kb:monitors-self-match]]` from a project note, `[[aic-edit:token-refresh]]`
+  the other way. Links genuinely run in both directions: a project's general
+  knowledge is promoted to kb while its tool-specific knowledge stays put, and
+  each half wants to reference the other.
+- **Within-source links must resolve; cross-source links resolve where the
+  target is checked out.** The first is a hard lint error — it is the guarantee
+  a lone clone needs, and `kb lint` on a bare public kb must still pass. The
+  second warns when the registry names a source that is absent and never fails,
+  because kb cannot depend on any other repo existing.
+- **A public source may link only public sources.** Unchanged in force from the
+  visibility rule it replaces: a private note's name inside a public link is
+  itself a leak, whether the private thing is kb-priv or a client's repo.
+  Private sources may link both ways.
 
 ## 7. The public/private boundary
 
@@ -1168,29 +1188,32 @@ Two tracks. The KB track is a prerequisite for the PM track's quality but not
 for its existence; the dashboard is deliberately pulled early because it attacks
 the top pain point and depends only on ticket files existing.
 
-| Phase | Track | Work                                                                                                                                                                                                                                                    | Done when                                                                                      |
-| ----- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| P0    | KB    | Create the vault repos (kb, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`. No automation.                                                                                                    | 15 notes pass lint; the index reads usefully                                                   |
-| P1    | KB    | The tools workspace repo; `kb lint` + index generation. The first script.                                                                                                                                                                               | Lint runs in pre-commit and CI                                                                 |
-| P2    | KB    | qmd, registry, collections, eval fixture.                                                                                                                                                                                                               | `kb bench` runs; hybrid measured against keyword-only                                          |
-| P3    | KB    | Surfacing: index pointers, prompt-submit hook with relevance floor, `kb` skill.                                                                                                                                                                         | A session surfaces a forgotten note                                                            |
-| P4    | PM    | Ticket schema, `pm new/show/set/move/list/lint`, state machine. Schema handling built as a general mechanism — validator plus form renderer — not a ticket-specific validator (§22). Tickets by hand only.                                              | A ticket cannot enter an invalid state, and the same schema code validates a non-ticket record |
-| P5    | PM    | **Dashboard**, read-only. `pm board` → HTML.                                                                                                                                                                                                            | Dave says the board answers "where am I up to?"                                                |
-| P6    | KB    | Cross-harness skills: canonical bodies, generator, stubs, `send-email` dedup, drift CI.                                                                                                                                                                 | One edit is live in all four harnesses                                                         |
-| P7    | KB    | Write path: `kb capture` with dedup gate.                                                                                                                                                                                                               | Capture reliably offers the right note to edit                                                 |
-| P8    | KB    | **Leak defense — blocks all public writes.** Denylist, allowlist gitignore, pre-push gate + in-process scan in `kb promote`, kb-priv tripwire CI, public generic CI.                                                                                    | A canary term is refused at push; one predating its term trips kb-priv CI                      |
-| P9    | KB    | `kb curate` on clex. Manual runs before scheduling.                                                                                                                                                                                                     | Two consecutive batches need no correction                                                     |
-| P10   | PM    | `pm dispatch` + `pm merge`: worktrees, per-project slots, orchestrator autonomy levels, model invocation. `lab-daemon` (§21.1): scheduling, stall alarms, notifications, board serving. Per-dispatch token and cost accounting into the ledger (§16.3). | A ticket builds end-to-end unattended                                                          |
-| P10b  | Both  | **Modules** (§22.1): manifest format, namespacing, target/tool/form declarations, aven as the module language with host capability scoping, console form rendering, and submit-creates-ticket.                                                          | The name module runs end-to-end from a console form                                            |
-| P11   | PM    | `pm review` with profiles + findings ledger; escalation rules. Preceded by the warm-vs-cold ledger experiment (§16.2).                                                                                                                                  | A grok ticket escalates to Sol on its own                                                      |
-| P12   | PM    | `pm investigate`: parallel positions + synthesis.                                                                                                                                                                                                       | An investigation ticket produces a crux document                                               |
-| P13   | Both  | Register remaining sources; schedule curation; project guidelines and diagrams.                                                                                                                                                                         | Unattended for a month                                                                         |
+| Phase | Track | Work                                                                                                                                                                                                                                                      | Done when                                                                                      |
+| ----- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| P0    | KB    | Create the vault repos (kb **private until P8**, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`, seed `kb-priv/policy/denylist.txt` from terms seen while migrating. No automation.             | 15 notes pass lint; the index reads usefully; the denylist has real terms in it                |
+| P1    | KB    | The tools workspace repo; `kb lint` + index generation, with the schema as a data file and a closed built-in predicate set (§22) — `SCHEMA.md` becomes generated. The first script.                                                                       | Lint runs in pre-commit; CI checks index freshness rather than writing it                      |
+| P2    | KB    | qmd, registry, collections, eval fixture.                                                                                                                                                                                                                 | `kb bench` runs; hybrid measured against keyword-only                                          |
+| P3    | KB    | Surfacing: index pointers, prompt-submit hook with relevance floor, `kb` skill.                                                                                                                                                                           | A session surfaces a forgotten note                                                            |
+| P4    | PM    | Ticket schema, `pm new/show/set/move/list/lint`, state machine. Schema handling built as a general mechanism — validator plus form renderer — not a ticket-specific validator (§22). Tickets by hand only.                                                | A ticket cannot enter an invalid state, and the same schema code validates a non-ticket record |
+| P5    | PM    | **Dashboard**, read-only. `pm board` → HTML.                                                                                                                                                                                                              | Dave says the board answers "where am I up to?"                                                |
+| P6    | KB    | Cross-harness skills: canonical bodies, generator, stubs, `send-email` dedup, drift CI.                                                                                                                                                                   | One edit is live in all four harnesses                                                         |
+| P7    | KB    | Write path: `kb capture` with dedup gate.                                                                                                                                                                                                                 | Capture reliably offers the right note to edit                                                 |
+| P8    | KB    | **Leak defense — blocks all public writes, and the phase kb goes public in.** Denylist (seeded at P0), allowlist gitignore, pre-push gate + in-process scan in `kb promote`, kb-priv tripwire CI, public generic CI, then the full-history scan and flip. | A canary term is refused at push; one predating its term trips kb-priv CI; kb is public        |
+| P9    | KB    | `kb curate` on clex. Manual runs before scheduling.                                                                                                                                                                                                       | Two consecutive batches need no correction                                                     |
+| P10   | PM    | `pm dispatch` + `pm merge`: worktrees, per-project slots, orchestrator autonomy levels, model invocation. `lab-daemon` (§21.1): scheduling, stall alarms, notifications, board serving. Per-dispatch token and cost accounting into the ledger (§16.3).   | A ticket builds end-to-end unattended                                                          |
+| P10b  | Both  | **Modules** (§22.1): manifest format, namespacing, target/tool/form declarations, aven as the module language with host capability scoping, console form rendering, and submit-creates-ticket.                                                            | The name module runs end-to-end from a console form                                            |
+| P11   | PM    | `pm review` with profiles + findings ledger; escalation rules. Preceded by the warm-vs-cold ledger experiment (§16.2).                                                                                                                                    | A grok ticket escalates to Sol on its own                                                      |
+| P12   | PM    | `pm investigate`: parallel positions + synthesis.                                                                                                                                                                                                         | An investigation ticket produces a crux document                                               |
+| P13   | Both  | Register remaining sources; schedule curation; project guidelines and diagrams.                                                                                                                                                                           | Unattended for a month                                                                         |
 
 Hard ordering constraints:
 
-- **P8 before any public promotion.** Until it lands, curation runs with public
-  promotion disabled entirely, and every public write is a hand-reviewed human
-  commit — no agent touches kb.
+- **P8 before any public promotion, and P8 is where kb becomes public at all.**
+  Until it lands, curation runs with public promotion disabled entirely and
+  every write to kb is a hand-reviewed human commit — no agent touches kb. kb
+  being private for that window makes the constraint recoverable rather than
+  merely stated: a mistake before P8 is a rewrite of a private history, which is
+  a chore, not a disclosure.
 - **P4 before P5.** The dashboard is a view; it needs something to view.
 - **P10 before P10b.** Forms need the daemon to serve them and dispatch to run
   what they create. The module layer is separable: it can slip past P11–P13
@@ -1250,8 +1273,16 @@ Hard ordering constraints:
   use a closed built-in rule set, so aven gates only the module layer (P10b) and
   never lint; TOML with a fixed predicate set remains the fallback if aven is
   not ready.
-- **Public history is permanent.** _Mitigate:_ small reviewed promotion batches;
-  curation may never force-push or rewrite public history.
+- **Public history is permanent.** _Mitigate:_ kb stays private until P8, so the
+  phases with no leak gate are recoverable; small reviewed promotion batches
+  after that; curation may never force-push or rewrite public history.
+- **Promotion breaks inbound cross-source links.** Moving a note from a project
+  into kb invalidates every `[[project:name]]` pointing at it, in repos the
+  promoting checkout may not have. _Mitigate:_ promotion leaves a tombstone in
+  the origin — a stub whose frontmatter carries `moved_to: kb:<name>` and no
+  body — so old links resolve through it and lint can rewrite lazily wherever it
+  next sees both sources. A tombstone is cheap; a cross-repo rewrite of repos
+  you do not have is not possible.
 - **The system raises output without raising review capacity.** The stated
   bottleneck is Dave. _Mitigate:_ the digest, the ledger and Claude-as-first-
   reviewer are load-bearing, not conveniences; the dashboard sorts by needs-you;
@@ -1432,6 +1463,48 @@ Resolved during the rev-7 review:
     answer is to build it rather than weaken the trust model; the path allowlist
     must canonicalise before checking, or `..` and symlinks walk straight out of
     it.
+35. **kb is created private and flips to public at P8** (§4, §23). The
+    asymmetry decides it: public history is permanent and the remedy is a rewrite
+    plus a disclosure, where a late flip costs one full-tree-and-history scan the
+    plan already specifies for repos opening late. P0–P7 is exactly the window
+    with no denylist, no pre-push gate and no tripwire CI, and the first content
+    in is the playbook, which is the most incident-dense text in the corpus.
+    Notes are written as though public throughout; the private window is an undo,
+    not a relaxation.
+36. **The denylist is seeded at P0, not P8** (§23). P8 builds the scanning
+    machinery; the list itself is a text file, and its terms are visible exactly
+    once — while a human reads the playbook and the style guide line by line to
+    migrate them. Reconstructing them seven phases later means recalling what was
+    in a migration long finished. P8 then starts from a real list and its canary
+    test has something to test against.
+37. **The note schema is a data file from P1, and `SCHEMA.md` is generated from
+    it** (§22, §23 P1). Decision 32's argument applies one phase earlier than it
+    was written: `kb lint` is the first schema consumer, so hardcoding rules at P1
+    buys a rewrite at P4 plus a drift window where the prose and the code
+    disagree. A closed built-in predicate set keeps aven out of P1 as decision 33
+    requires. P0 is unaffected — prose and fifteen hand-written notes, no
+    machinery.
+38. **Names are unique per source, and cross-source links carry the source
+    prefix** (§6). The namespace was never two vaults: every project keeps its own
+    tool-specific knowledge while its general knowledge is promoted to kb, so the
+    registry's source list _is_ the namespace list and it grows with every
+    project. `[[name]]` is within-source and must resolve; `[[source:name]]`
+    crosses and resolves only where that source is checked out. Public sources
+    may link only public sources, which is the old visibility rule surviving
+    intact. The cost is that promotion breaks inbound links, paid with a tombstone
+    (§24).
+39. **`INDEX.md` is committed, and refreshed off the commit path** (§9, §23 P1).
+    Committing it is what lets a fresh clone and a harness without the binary read
+    the tier at all, which is the tier's entire purpose. The churn is real, so
+    regeneration happens at curation-batch boundaries and on demand — §24's
+    position already, since a mid-session refresh reaches nobody — and CI
+    _checks_ freshness rather than pre-commit _writing_ it. Auto-writing on commit
+    is what manufactures the conflicts.
+40. **YAML frontmatter with TOML for configuration, deliberately** (§5, §6).
+    YAML frontmatter is what the existing memory files carry and what the harness
+    itself writes, so switching costs a migration and breaks writes the system
+    does not control; TOML is right for hand-edited config with no document body.
+    Two parsers is not a burden worth a migration to avoid.
 
 ---
 
