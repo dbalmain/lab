@@ -219,7 +219,7 @@ operate on them — public code, private vaults (§22).
 ├── lessons/                     durable cross-project lessons
 ├── reference/                   tool / API / protocol facts
 ├── decisions/                   rationale that outlived its project
-├── style/                       absorbs ~/style-guide
+├── coding/                      absorbs ~/style-guide, plus testing
 └── skills/                      canonical cross-harness skills (§10)
 
 ~/w/kb-priv/                     PRIVATE
@@ -292,7 +292,7 @@ directories are not uniformly "knowledge".
 Disposition of existing repos:
 
 - **`dbalmain/style-guide` — absorb.** Five files, all public reference. Becomes
-  `kb/style/`; archive the repo. Migration cost is one grep: offload prompts
+  `kb/coding/`; archive the repo. Migration cost is one grep: offload prompts
   reference it by path.
 - **`dbalmain/ai-tools` — keep.** It is code. Only `skills/` moves out.
 - **`dbalmain/claude` — shrink.** Loses `agent-playbook.md` and the general half
@@ -397,7 +397,7 @@ proven by hand on real content before any machinery assumes it.
 description:
   A watcher that greps for a pattern present in its own command line matches
   itself and spins forever.
-type: lesson # lesson | reference | decision | howto | style | client | task | finding | position
+type: lesson # lesson | reference | decision | howto | guide | client | task | finding | position
 scope: global # global | project:clex | client:acme
 confidence: high # high | medium | low
 asserted: 2026-07-22 # when this was last known true
@@ -421,11 +421,17 @@ Body: the fact, then `**Why:**`, then `**How to apply:**`. Link with `[[name]]`.
 
 Rules:
 
-- **One concept per note.** If the description needs an "and", it is two notes.
-  `style` is the one exempt type — a style guide is read whole and pointed at by
-  path (§10), so splitting it into forty notes destroys what makes it useful.
-  The type was added by P0 content: absorbing `~/style-guide` produced four
-  documents that are notes in every respect except this one.
+- **One concept per note — unless the trigger is general, and then
+  consolidate.** Dave's rule, and the counterweight that stops the first half
+  shredding the corpus. The more often a trigger fires and the broader it is,
+  the more the knowledge behind it belongs in one document rather than scattered
+  across notes: a coding guide fires on every line of code written, a testing
+  guide on every test, and something that general has to carry everything needed
+  for the task in one place — the alternative is assembling fifteen retrieval
+  hits by hand, every time. `guide` is the type for that, added by P0 content,
+  and the only one exempt. A rule inside a guide graduates to a `lesson` only
+  when its own trigger is narrower than the guide's and getting it wrong has a
+  failure mode.
 - **Edit over create.** Before writing, search for the note this should have
   been an edit to. Enforced on the write path (§9), not by good intentions.
 - **No note without provenance.**
