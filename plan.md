@@ -1,7 +1,15 @@
 # Plan: shared knowledge base + agent project management
 
-Status: rev 10 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev
-10 settles when a move rewrites its inbound links: lazily, by each source's next
+Status: rev 12 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev
+12 puts a `Runner` boundary between dispatch and any particular agent CLI
+(§21.3, decision 46): `CliRunner` ships at P10, our own loop is the expected
+destination, and what defers it is metered-versus-subscription billing rather
+than engineering — now a priced P10 blocker (open question 6). Rev
+11 adds the supervision spec (§21.2), written from P0's seven watching-a-run
+notes read as a requirements list: the supervisor is the parent process, so it
+observes first-hand instead of inferring from `pgrep` and log mtime, and half
+the monitoring corpus stops applying rather than being encoded (decision 45).
+Rev 10 settles when a move rewrites its inbound links: lazily, by each source's next
 `lint --fix`, so a move never writes into a repo the mover was not working in,
 with git rename detection as the record of last resort and an unresolvable link
 escalated rather than guessed at (decision 44). Rev 9
@@ -1088,6 +1096,149 @@ module's field schema and then executed as `pm new`, taking the same flock as
 every other write; the daemon never edits a ticket file itself. With the daemon
 down, forms are unavailable and the CLI is untouched — degraded, not broken.
 
+### 21.2 Supervision
+
+Seven of the twenty notes written in P0 exist only because agents are driven by
+shelling out and inferring their state from `ps`, `pgrep` and log mtime. They are
+not knowledge about agents; they are a workaround log for a missing abstraction,
+which is §2 principle 1 pointed at operations. Read as a requirements list they
+specify the supervision layer better than anything drafted cold, so this section
+is written from them and each rule names the note it comes from.
+
+**The invariant: state is observed first-hand, never inferred.** The supervisor
+is the parent process. It never asks the operating system a question about an
+agent it did not launch, and never matches a pattern against a process table.
+
+**Launch.** Agents are spawned by the supervisor, in their own cgroup — on this
+machine `systemd-run --user --scope`, with a process group as the portable
+fallback — with stdout and stderr on pipes it owns and tees to the run log. The
+cgroup is strictly stronger than a process group: nothing escapes by
+double-forking, kill-the-cgroup is total, and CPU and memory accounting come
+free into the ledger rather than being sampled. It records at
+spawn: pid, the argv actually passed, the worktree, the ticket, and a monotonic
+start time. Because the handle comes from the spawn rather than a search, three
+notes stop applying at once — `monitors-self-match` has no pattern to
+self-match, `patterns-that-match-nothing` has no pattern to over-anchor, and
+`grok-cli-argv-rewrite` does not matter because nothing greps argv. The process
+group is what makes abandonment clean: a killed run takes its children with it.
+
+**The four signals.** Every liveness decision reads these and nothing else:
+
+| Signal     | Source                                    | Replaces               |
+| ---------- | ----------------------------------------- | ---------------------- |
+| `alive`    | `pidfd`/`waitpid` on the child we spawned | `pgrep`, and PID reuse |
+| `output`   | bytes written to the pipe since last tick | log mtime              |
+| `cpu`      | `/proc/<pid>/stat` delta between ticks    | "it looks busy"        |
+| `artefact` | worktree `HEAD` and dirtiness             | trusting the run log   |
+
+`output` is **growth**, never modification time: an agent that writes 522 bytes
+and then works silently for ten minutes is normal, and mtime is the one signal
+that sits still while the agent is busy (`log-mtime-is-not-a-heartbeat`).
+
+**Every timer starts at a transition the supervisor saw.** Thresholds are
+measured from spawn, from the last byte observed, or from the last HEAD change —
+never against a wall-clock age the supervisor inherited. A staleness timer armed
+against a file that was already stale fires on a condition that predates it
+(`staleness-timers-start-when-the-watch-does`).
+
+**Three failure states, distinguished rather than merged.** The lessons'
+substance is that these look alike from outside and want opposite responses:
+
+- **Never started** — zero bytes ever written, CPU flat and tiny, no artefact,
+  and `wchan` in a network wait. The conjunction is the test; each signal alone
+  also describes a healthy first minute (`an-agent-that-never-starts`).
+- **Stalled** — has produced output before, but neither log growth nor a new
+  commit for the stall window, while alive.
+- **Finished but not exited** — a done-note or commit landed, then nothing, CPU
+  flat, process still up. Reap it. A live process is not a running agent
+  (`process-liveness-is-not-progress`).
+
+**Thresholds are baselines, not constants.** The supervisor records
+time-to-first-byte and CPU-per-minute per CLI per run in the ledger, and derives
+its thresholds from that distribution. "Has this agent ever produced anything,
+and do its siblings produce sooner?" is answerable in seconds with a baseline
+and unanswerable with a fixed timeout.
+
+**Never started trips a circuit breaker on the CLI, not a queue.** That CLI is
+marked down for the session and dispatch routes elsewhere. Explicitly not the
+remedy: serialising, on a theory of contention. The same hang has been observed
+with no sibling run at all, and believing the contention story costs the next
+attempt (`a-hung-agent-is-not-contention`).
+
+**A stall escalates; it does not kill.** Supervision reports to the dashboard as
+needs-you and waits. Killing a working agent, or launching a second writer into
+a repo the first still holds, is the expensive direction to be wrong in, and
+every monitoring note is about a signal that said "stalled" while the agent
+worked.
+
+**Interactive sessions are swept, not supervised.** A bare TUI the supervisor
+did not spawn is outside its model. `lab agents --stale` lists processes for a
+known CLI that carry no supervisor handle, with age and CPU, for a human to
+kill. This is the one place a process-table scan remains, and it is a report
+rather than a control loop.
+
+**What supervision does not do.** It says whether an agent is working, never
+whether the work is right. `green-gates-dont-prove-the-fix`,
+`a-fresh-binary-is-not-evidence` and `instrument-dont-reread` stay human
+judgment, and the four signals must not be dressed up as progress.
+
+**The notes survive the code that replaces them.** A check whose rationale lives
+only in a commit message is a check nobody dares delete and nobody can defend.
+Each rule above cites its note, the notes become `type: decision` when the code
+lands, and `coding-style`'s rule applies — the hazard is documented at the code
+it protects.
+
+**Phasing.** Supervision ships with dispatch at P10 and is a property of the
+spawning code, not of `lab-daemon`: a foreground `pm dispatch` supervises its own
+child with the same four signals. The daemon adds only the persistent view —
+baselines across runs, the dashboard, the alarms.
+
+### 21.3 The runner boundary
+
+Dispatch talks to a **`Runner`**, never to a CLI. A runner is handed a brief, a
+worktree and a capability grant, and returns a result plus a usage record; how
+it gets there is its own business. Two implementations are anticipated:
+
+- **`CliRunner`** — spawns `grok`, `codex` or `claude` as a supervised child per
+  §21.2. This is what P10 ships.
+- **`NativeRunner`** — owns the agent loop directly against the model APIs:
+  the prompt, the context, tool dispatch, and cache control.
+
+**Why the boundary exists rather than a straight choice.** Everything the cost
+thesis (§16.3) needs is unreachable through a vendor CLI. Cache breakpoints are
+not settable, the prefix is not ours, a context cannot be forked or snapshotted,
+and warm resumption is not guaranteed — which is why §16.2's warm-iteration
+question is still open and, through a CLI, close to unanswerable. Owning the
+loop turns a context into a value and warm iteration into appending to it, and
+the ledger gets true per-turn cache-hit figures because the API returns them.
+The same argument holds for modules: with our own loop, aven modules **are** the
+tool surface and decision 34's per-invocation capability scoping is enforced by
+the host. Through a CLI the tool surface is MCP and the capability boundary is
+gone.
+
+**Why not simply build it now.** Two costs, one of which is decisive. The
+decisive one is billing: the Claude and GPT subscriptions are flat monthly and
+the CLIs are how they are spent, while a native runner is metered per token.
+Whether the same work costs 1x or 10x is a number nobody here has, and it is a
+P10 blocker rather than a detail (§25 open question 6). The second is that a
+harness is a thousand accumulated details — retries, streaming, tool-call
+parsing, cache-control placement, diff application, model-specific quirks —
+tuned by people with evals we do not have, so a homegrown loop underperforms the
+CLI on the same model until it is tuned.
+
+**What the boundary costs.** One interface to design honestly, and the standing
+temptation to shape it around whatever the CLIs happen to expose. The guard is
+that `Runner` is specified from what a native loop needs — a context handle that
+outlives a call, an explicit cache-prefix marker, a usage record per turn — and
+`CliRunner` is allowed to return "unknown" for the parts it cannot see. An
+interface that fits the CLIs comfortably is the wrong interface, because the
+whole point is to escape their limits.
+
+**The expected destination is `NativeRunner`.** This is sequencing, not a hedge:
+the substrate — supervision, worktrees, ledger, the aven module layer — is
+identical under both, so none of it is wasted, and the call is deferred to when
+§16.3 has measurements rather than made now on a guess.
+
 ## 22. Command surface
 
 Two binaries, `kb` and `pm`, in one public cargo workspace (§4) with shared
@@ -1256,23 +1407,23 @@ Two tracks. The KB track is a prerequisite for the PM track's quality but not
 for its existence; the dashboard is deliberately pulled early because it attacks
 the top pain point and depends only on ticket files existing.
 
-| Phase | Track | Work                                                                                                                                                                                                                                                      | Done when                                                                                                                 |
-| ----- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| P0    | KB    | Create the vault repos (kb **private until P8**, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`, seed `kb-priv/policy/denylist.txt` from terms seen while migrating. No automation.             | The index reads usefully and the denylist has real terms in it; the notes become P1's lint fixture, checked retroactively |
-| P1    | KB    | The tools workspace repo; `kb lint --fix`, `kb migrate` and index generation, with the schema as a data file and a closed built-in predicate set (§22) — `SCHEMA.md` becomes generated. Autofix and migration are P1 scope, not later polish.             | A schema change is applied across every note by one command, not by hand                                                  |
-| P2    | KB    | qmd, registry, collections, eval fixture.                                                                                                                                                                                                                 | `kb bench` runs; hybrid measured against keyword-only                                                                     |
-| P3    | KB    | Surfacing: index pointers, prompt-submit hook with relevance floor, `kb` skill.                                                                                                                                                                           | A session surfaces a forgotten note                                                                                       |
-| P4    | PM    | Ticket schema, `pm new/show/set/move/list/lint`, state machine. Schema handling built as a general mechanism — validator plus form renderer — not a ticket-specific validator (§22). Tickets by hand only.                                                | A ticket cannot enter an invalid state, and the same schema code validates a non-ticket record                            |
-| P5    | PM    | **Dashboard**, read-only. `pm board` → HTML.                                                                                                                                                                                                              | Dave says the board answers "where am I up to?"                                                                           |
-| P6    | KB    | Cross-harness skills: canonical bodies, generator, stubs, `send-email` dedup, drift CI.                                                                                                                                                                   | One edit is live in all four harnesses                                                                                    |
-| P7    | KB    | Write path: `kb capture` with dedup gate.                                                                                                                                                                                                                 | Capture reliably offers the right note to edit                                                                            |
-| P8    | KB    | **Leak defense — blocks all public writes, and the phase kb goes public in.** Denylist (seeded at P0), allowlist gitignore, pre-push gate + in-process scan in `kb promote`, kb-priv tripwire CI, public generic CI, then the full-history scan and flip. | A canary term is refused at push; one predating its term trips kb-priv CI; kb is public                                   |
-| P9    | KB    | `kb curate` on clex. Manual runs before scheduling.                                                                                                                                                                                                       | Two consecutive batches need no correction                                                                                |
-| P10   | PM    | `pm dispatch` + `pm merge`: worktrees, per-project slots, orchestrator autonomy levels, model invocation. `lab-daemon` (§21.1): scheduling, stall alarms, notifications, board serving. Per-dispatch token and cost accounting into the ledger (§16.3).   | A ticket builds end-to-end unattended                                                                                     |
-| P10b  | Both  | **Modules** (§22.1): manifest format, namespacing, target/tool/form declarations, aven as the module language with host capability scoping, console form rendering, and submit-creates-ticket.                                                            | The name module runs end-to-end from a console form                                                                       |
-| P11   | PM    | `pm review` with profiles + findings ledger; escalation rules. Preceded by the warm-vs-cold ledger experiment (§16.2).                                                                                                                                    | A grok ticket escalates to Sol on its own                                                                                 |
-| P12   | PM    | `pm investigate`: parallel positions + synthesis.                                                                                                                                                                                                         | An investigation ticket produces a crux document                                                                          |
-| P13   | Both  | Register remaining sources; schedule curation; project guidelines and diagrams.                                                                                                                                                                           | Unattended for a month                                                                                                    |
+| Phase | Track | Work                                                                                                                                                                                                                                                                                                                                                                                                                                                | Done when                                                                                                                 |
+| ----- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| P0    | KB    | Create the vault repos (kb **private until P8**, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`, seed `kb-priv/policy/denylist.txt` from terms seen while migrating. No automation.                                                                                                                                                                                                       | The index reads usefully and the denylist has real terms in it; the notes become P1's lint fixture, checked retroactively |
+| P1    | KB    | The tools workspace repo; `kb lint --fix`, `kb migrate` and index generation, with the schema as a data file and a closed built-in predicate set (§22) — `SCHEMA.md` becomes generated. Autofix and migration are P1 scope, not later polish.                                                                                                                                                                                                       | A schema change is applied across every note by one command, not by hand                                                  |
+| P2    | KB    | qmd, registry, collections, eval fixture.                                                                                                                                                                                                                                                                                                                                                                                                           | `kb bench` runs; hybrid measured against keyword-only                                                                     |
+| P3    | KB    | Surfacing: index pointers, prompt-submit hook with relevance floor, `kb` skill.                                                                                                                                                                                                                                                                                                                                                                     | A session surfaces a forgotten note                                                                                       |
+| P4    | PM    | Ticket schema, `pm new/show/set/move/list/lint`, state machine. Schema handling built as a general mechanism — validator plus form renderer — not a ticket-specific validator (§22). Tickets by hand only.                                                                                                                                                                                                                                          | A ticket cannot enter an invalid state, and the same schema code validates a non-ticket record                            |
+| P5    | PM    | **Dashboard**, read-only. `pm board` → HTML.                                                                                                                                                                                                                                                                                                                                                                                                        | Dave says the board answers "where am I up to?"                                                                           |
+| P6    | KB    | Cross-harness skills: canonical bodies, generator, stubs, `send-email` dedup, drift CI.                                                                                                                                                                                                                                                                                                                                                             | One edit is live in all four harnesses                                                                                    |
+| P7    | KB    | Write path: `kb capture` with dedup gate.                                                                                                                                                                                                                                                                                                                                                                                                           | Capture reliably offers the right note to edit                                                                            |
+| P8    | KB    | **Leak defense — blocks all public writes, and the phase kb goes public in.** Denylist (seeded at P0), allowlist gitignore, pre-push gate + in-process scan in `kb promote`, kb-priv tripwire CI, public generic CI, then the full-history scan and flip.                                                                                                                                                                                           | A canary term is refused at push; one predating its term trips kb-priv CI; kb is public                                   |
+| P9    | KB    | `kb curate` on clex. Manual runs before scheduling.                                                                                                                                                                                                                                                                                                                                                                                                 | Two consecutive batches need no correction                                                                                |
+| P10   | PM    | `pm dispatch` + `pm merge`: worktrees, per-project slots, orchestrator autonomy levels, model invocation behind the `Runner` boundary (§21.3), shipping `CliRunner` and supervision (§21.2). `lab-daemon` (§21.1): scheduling, stall alarms, notifications, board serving. Per-dispatch token and cost accounting into the ledger (§16.3). **Blocker:** metered API cost for real volume, priced before `Runner` is designed (§25 open question 6). | A ticket builds end-to-end unattended                                                                                     |
+| P10b  | Both  | **Modules** (§22.1): manifest format, namespacing, target/tool/form declarations, aven as the module language with host capability scoping, console form rendering, and submit-creates-ticket.                                                                                                                                                                                                                                                      | The name module runs end-to-end from a console form                                                                       |
+| P11   | PM    | `pm review` with profiles + findings ledger; escalation rules. Preceded by the warm-vs-cold ledger experiment (§16.2).                                                                                                                                                                                                                                                                                                                              | A grok ticket escalates to Sol on its own                                                                                 |
+| P12   | PM    | `pm investigate`: parallel positions + synthesis.                                                                                                                                                                                                                                                                                                                                                                                                   | An investigation ticket produces a crux document                                                                          |
+| P13   | Both  | Register remaining sources; schedule curation; project guidelines and diagrams.                                                                                                                                                                                                                                                                                                                                                                     | Unattended for a month                                                                                                    |
 
 Hard ordering constraints:
 
@@ -1528,6 +1679,15 @@ decision 34.)_
 _(Question 5, on when a move rewrites its inbound links, was answered lazy and
 is now decision 44.)_
 
+6. **What does a month of this work cost metered, against two flat
+   subscriptions?** The `Runner` boundary (§21.3) defers the native-loop
+   decision, but not indefinitely: everything §16.3 wants to measure needs cache
+   control the CLIs do not expose, so `NativeRunner` is the expected
+   destination and this number decides when. It is a P10 blocker because the
+   interface should be designed knowing the answer. Priced from `token-report.py`
+   output over a representative stretch against current API rates — not
+   estimated.
+
 Resolved during the rev-7 review:
 
 34. **Capability grants are per-invocation already; scoping within a capability
@@ -1638,6 +1798,30 @@ Resolved during the rev-7 review:
     split between the mechanically fixable and the ones needing judgment
     (decision 41) already has the right shape for this, and a link with no
     provenance for where its target went is squarely the second kind.
+45. **Supervision observes first-hand and never infers** (§21.2). Written from
+    the seven P0 notes about watching a run, which are a workaround log for
+    driving agents by `pgrep` and log mtime rather than knowledge about agents.
+    The supervisor is the parent process, so it holds a handle rather than a
+    pattern, reads output growth rather than mtime, starts every timer at a
+    transition it saw, and distinguishes never-started from stalled from
+    finished-but-not-exited because those look alike from outside and want
+    opposite responses. Two rules are about the cost asymmetry rather than the
+    mechanism: a stall escalates and never kills, because killing a working
+    agent or launching a second writer is the expensive direction; and a
+    never-started trips a circuit breaker on that CLI rather than serialising,
+    because the contention story is comfortable and wrong. The notes are not
+    deleted when the code lands — they become the rationale it cites, or the
+    check outlives everyone's memory of why it exists.
+46. **Dispatch talks to a `Runner`, not to a CLI** (§21.3, §23 P10). Dave's
+    call, choosing sequencing over a straight fork. `CliRunner` ships at P10 and
+    `NativeRunner` — our own agent loop against the model APIs — is the expected
+    destination rather than a hedge, because cache control, context forking and
+    a true per-turn usage record are all unreachable through a vendor CLI, and
+    they are exactly what §16.3 exists to measure. What defers it is billing,
+    not engineering: the subscriptions are flat and metered API use is not, and
+    that number is open question 6. The interface is specified from what a
+    native loop needs and lets `CliRunner` answer "unknown", because an
+    interface that fits the CLIs comfortably is the wrong one.
 
 ---
 
