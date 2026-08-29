@@ -1254,6 +1254,22 @@ Four consequences worth stating before the code exists:
   a property of the interface rather than a discipline someone remembers: root
   cause, what changed, gates claimed green, and a pointer to the run log for
   anyone who wants more.
+- **The transcript is retained, addressable and sliceable — it is just not
+  returned.** Every run's full output is captured to a run log keyed by ticket
+  and run number (a ticket may have several), and `pm log <ticket> [--run N]`
+  reads it back, with `--tail`, `--turn`, `--tool-calls` and `--grep` so that
+  debugging does not cost what the offload saved. Whole-transcript output takes
+  an explicit flag, because the default must not be "paste 200KB into the
+  context we were protecting". Under `NativeRunner` the transcript is structured
+  per turn with its own usage record, which makes it the ledger's raw data
+  rather than a second artefact.
+- **When a run goes wrong, the transcript is the last evidence consulted, not
+  the first.** The ticket surfaces, in order: the diff and gate output, then the
+  run's tool-call summary, then the full transcript. `dead-agent-last-words-
+describe-intent` is exactly this — a transcript says what the agent believed
+  it was doing, and the tree says what happened. A failed, stalled or reaped run
+  links its log on the ticket and the dashboard without being asked, so nobody
+  has to know the flag exists.
 - **The outer agent does not get to bypass the slot.** A dispatch into a project
   whose single slot is busy queues or is refused; it never spawns a second
   writer into the same tree (`never-two-writers-in-one-repo`). Refusal names the
@@ -1866,7 +1882,9 @@ Resolved during the rev-7 review:
     unattended work, and means an interactive session dying leaves a run that
     still lands. It also makes `offload-keeps-context-clean` an interface
     property: an agent-driven dispatch returns a done-note, because the result
-    is landing in the caller's context.
+    is landing in the caller's context — retained and returned are different
+    things, so the full transcript is always captured and read back on demand
+    through `pm log`, sliced by default.
 
 ---
 
