@@ -1,6 +1,10 @@
 # Plan: shared knowledge base + agent project management
 
-Status: rev 9 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev 9
+Status: rev 10 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev
+10 settles when a move rewrites its inbound links: lazily, by each source's next
+`lint --fix`, so a move never writes into a repo the mover was not working in,
+with git rename detection as the record of last resort and an unresolvable link
+escalated rather than guessed at (decision 44). Rev 9
 is the first written against real content: P0's twenty notes exist, and writing
 them removed two schema fields as derivable (decision 42) and replaced the
 tombstone with a link index spanning every source, which yields backlinks and
@@ -445,15 +449,22 @@ Rules:
   visibility rule it replaces: a private note's name inside a public link is
   itself a leak, whether the private thing is kb-priv or a client's repo.
   Private sources may link both ways.
-- **Every link is indexed in kb-priv, and a move rewrites its inbound links.**
-  The index spans all registered sources, so promoting or renaming a note updates
-  what points at it rather than leaving a redirect behind. It is also what makes
-  backlinks and link-weighted retrieval possible, neither of which a per-note
-  redirect could support. A note being promoted is usually new and has few
-  inbound links; the index is what makes that a fact rather than a hope. The
-  index lives in kb-priv because it necessarily names private notes, and must be
-  present for a promotion to proceed — the same fail-closed coupling as the
-  denylist (§24).
+- **Every link is indexed in kb-priv, and a move rewrites its inbound links —
+  lazily.** The index spans all registered sources, so promoting or renaming a
+  note updates what points at it rather than leaving a redirect behind. It is
+  also what makes backlinks and link-weighted retrieval possible, neither of
+  which a per-note redirect could support. A note being promoted is usually new
+  and has few inbound links; the index is what makes that a fact rather than a
+  hope. The index lives in kb-priv because it necessarily names private notes.
+  The rewrite is applied by each source's next `lint --fix`, not by the move
+  itself: a move never writes into a repo the mover was not working in (decision
+  44). Three consequences. A move is recorded where it happens — git's own
+  rename detection is the record of last resort, so a move made while kb-priv is
+  not checked out is still recoverable from history rather than lost. A link
+  the index cannot account for is reported for Dave to investigate, never
+  guessed at — the index says which links are stale, and an unresolvable one is
+  a question, not a repair. And the index being absent does not block a move,
+  because history holds what the index would have held.
 
 ## 7. The public/private boundary
 
@@ -1099,6 +1110,13 @@ being data (decision 37): autofix against hardcoded rules means writing a
 bespoke migration each time, where autofix against a described schema can derive
 most of them.
 
+A move is a migration too. Promotion and renaming rewrite inbound links through
+the same autofix pass (decision 44) rather than a separate cross-repo write, so
+`lint --fix` in a source applies whatever moves happened elsewhere since it last
+ran. `kb lint` reports the pending set alongside schema violations, and a link
+it cannot resolve — no index entry, no rename in history — is escalated rather
+than repaired.
+
 ```sh
 # knowledge base
 kb lint [--fix] [--explain]        # schema, links, orphans, index sync
@@ -1228,23 +1246,23 @@ Two tracks. The KB track is a prerequisite for the PM track's quality but not
 for its existence; the dashboard is deliberately pulled early because it attacks
 the top pain point and depends only on ticket files existing.
 
-| Phase | Track | Work                                                                                                                                                                                                                                                      | Done when                                                                                      |
-| ----- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| P0    | KB    | Create the vault repos (kb **private until P8**, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`, seed `kb-priv/policy/denylist.txt` from terms seen while migrating. No automation. | The index reads usefully and the denylist has real terms in it; the notes become P1's lint fixture, checked retroactively |
-| P1    | KB    | The tools workspace repo; `kb lint --fix`, `kb migrate` and index generation, with the schema as a data file and a closed built-in predicate set (§22) — `SCHEMA.md` becomes generated. Autofix and migration are P1 scope, not later polish. | A schema change is applied across every note by one command, not by hand |
-| P2    | KB    | qmd, registry, collections, eval fixture.                                                                                                                                                                                                                 | `kb bench` runs; hybrid measured against keyword-only                                          |
-| P3    | KB    | Surfacing: index pointers, prompt-submit hook with relevance floor, `kb` skill.                                                                                                                                                                           | A session surfaces a forgotten note                                                            |
-| P4    | PM    | Ticket schema, `pm new/show/set/move/list/lint`, state machine. Schema handling built as a general mechanism — validator plus form renderer — not a ticket-specific validator (§22). Tickets by hand only.                                                | A ticket cannot enter an invalid state, and the same schema code validates a non-ticket record |
-| P5    | PM    | **Dashboard**, read-only. `pm board` → HTML.                                                                                                                                                                                                              | Dave says the board answers "where am I up to?"                                                |
-| P6    | KB    | Cross-harness skills: canonical bodies, generator, stubs, `send-email` dedup, drift CI.                                                                                                                                                                   | One edit is live in all four harnesses                                                         |
-| P7    | KB    | Write path: `kb capture` with dedup gate.                                                                                                                                                                                                                 | Capture reliably offers the right note to edit                                                 |
-| P8    | KB    | **Leak defense — blocks all public writes, and the phase kb goes public in.** Denylist (seeded at P0), allowlist gitignore, pre-push gate + in-process scan in `kb promote`, kb-priv tripwire CI, public generic CI, then the full-history scan and flip. | A canary term is refused at push; one predating its term trips kb-priv CI; kb is public        |
-| P9    | KB    | `kb curate` on clex. Manual runs before scheduling.                                                                                                                                                                                                       | Two consecutive batches need no correction                                                     |
-| P10   | PM    | `pm dispatch` + `pm merge`: worktrees, per-project slots, orchestrator autonomy levels, model invocation. `lab-daemon` (§21.1): scheduling, stall alarms, notifications, board serving. Per-dispatch token and cost accounting into the ledger (§16.3).   | A ticket builds end-to-end unattended                                                          |
-| P10b  | Both  | **Modules** (§22.1): manifest format, namespacing, target/tool/form declarations, aven as the module language with host capability scoping, console form rendering, and submit-creates-ticket.                                                            | The name module runs end-to-end from a console form                                            |
-| P11   | PM    | `pm review` with profiles + findings ledger; escalation rules. Preceded by the warm-vs-cold ledger experiment (§16.2).                                                                                                                                    | A grok ticket escalates to Sol on its own                                                      |
-| P12   | PM    | `pm investigate`: parallel positions + synthesis.                                                                                                                                                                                                         | An investigation ticket produces a crux document                                               |
-| P13   | Both  | Register remaining sources; schedule curation; project guidelines and diagrams.                                                                                                                                                                           | Unattended for a month                                                                         |
+| Phase | Track | Work                                                                                                                                                                                                                                                      | Done when                                                                                                                 |
+| ----- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| P0    | KB    | Create the vault repos (kb **private until P8**, kb-priv, pm), write `SCHEMA.md`, hand-migrate `agent-playbook.md` into ~15 notes, absorb `~/style-guide`, seed `kb-priv/policy/denylist.txt` from terms seen while migrating. No automation.             | The index reads usefully and the denylist has real terms in it; the notes become P1's lint fixture, checked retroactively |
+| P1    | KB    | The tools workspace repo; `kb lint --fix`, `kb migrate` and index generation, with the schema as a data file and a closed built-in predicate set (§22) — `SCHEMA.md` becomes generated. Autofix and migration are P1 scope, not later polish.             | A schema change is applied across every note by one command, not by hand                                                  |
+| P2    | KB    | qmd, registry, collections, eval fixture.                                                                                                                                                                                                                 | `kb bench` runs; hybrid measured against keyword-only                                                                     |
+| P3    | KB    | Surfacing: index pointers, prompt-submit hook with relevance floor, `kb` skill.                                                                                                                                                                           | A session surfaces a forgotten note                                                                                       |
+| P4    | PM    | Ticket schema, `pm new/show/set/move/list/lint`, state machine. Schema handling built as a general mechanism — validator plus form renderer — not a ticket-specific validator (§22). Tickets by hand only.                                                | A ticket cannot enter an invalid state, and the same schema code validates a non-ticket record                            |
+| P5    | PM    | **Dashboard**, read-only. `pm board` → HTML.                                                                                                                                                                                                              | Dave says the board answers "where am I up to?"                                                                           |
+| P6    | KB    | Cross-harness skills: canonical bodies, generator, stubs, `send-email` dedup, drift CI.                                                                                                                                                                   | One edit is live in all four harnesses                                                                                    |
+| P7    | KB    | Write path: `kb capture` with dedup gate.                                                                                                                                                                                                                 | Capture reliably offers the right note to edit                                                                            |
+| P8    | KB    | **Leak defense — blocks all public writes, and the phase kb goes public in.** Denylist (seeded at P0), allowlist gitignore, pre-push gate + in-process scan in `kb promote`, kb-priv tripwire CI, public generic CI, then the full-history scan and flip. | A canary term is refused at push; one predating its term trips kb-priv CI; kb is public                                   |
+| P9    | KB    | `kb curate` on clex. Manual runs before scheduling.                                                                                                                                                                                                       | Two consecutive batches need no correction                                                                                |
+| P10   | PM    | `pm dispatch` + `pm merge`: worktrees, per-project slots, orchestrator autonomy levels, model invocation. `lab-daemon` (§21.1): scheduling, stall alarms, notifications, board serving. Per-dispatch token and cost accounting into the ledger (§16.3).   | A ticket builds end-to-end unattended                                                                                     |
+| P10b  | Both  | **Modules** (§22.1): manifest format, namespacing, target/tool/form declarations, aven as the module language with host capability scoping, console form rendering, and submit-creates-ticket.                                                            | The name module runs end-to-end from a console form                                                                       |
+| P11   | PM    | `pm review` with profiles + findings ledger; escalation rules. Preceded by the warm-vs-cold ledger experiment (§16.2).                                                                                                                                    | A grok ticket escalates to Sol on its own                                                                                 |
+| P12   | PM    | `pm investigate`: parallel positions + synthesis.                                                                                                                                                                                                         | An investigation ticket produces a crux document                                                                          |
+| P13   | Both  | Register remaining sources; schedule curation; project guidelines and diagrams.                                                                                                                                                                           | Unattended for a month                                                                                                    |
 
 Hard ordering constraints:
 
@@ -1326,9 +1344,10 @@ Hard ordering constraints:
   link-weighted retrieval come from the same structure — and it turns an
   unknowable blast radius into a listed one. Where a source is not checked out
   the rewrite cannot happen, but the index still names what was missed, which is
-  the difference between a deferred fix and a silent break. _Open:_ whether the
-  rewrite runs eagerly at promotion time or is applied by each source's next
-  `lint --fix` (§25 open question 5).
+  the difference between a deferred fix and a silent break. The rewrite is lazy
+  — each source's next `lint --fix` applies it (decision 44) — so a move never
+  writes into a repo the mover was not working in, and git rename detection
+  covers a move made with the index offline.
 - **The system raises output without raising review capacity.** The stated
   bottleneck is Dave. _Mitigate:_ the digest, the ledger and Claude-as-first-
   reviewer are load-bearing, not conveniences; the dashboard sorts by needs-you;
@@ -1496,16 +1515,8 @@ Still open — the plan proceeds on these assumptions and tests them:
 _(Question 4, on aven capability scoping, was answered by inspection and is now
 decision 34.)_
 
-5. **Does a move rewrite inbound links eagerly at promotion time, or lazily via
-   each source's next `lint --fix`?** Decision 43 settles that the index exists
-   and that a move updates what points at the note; it does not settle when.
-   Eager keeps the corpus consistent at every instant, but writes into repos the
-   promoter was not working in — the same "a scheduled run and Dave in one
-   working tree" problem §11 avoided by having curation read snapshots, and it
-   requires those trees to be clean. Lazy writes only to the repo being linted,
-   rides the autofix machinery decision 41 already requires, and leaves a window
-   where a link is known-stale but unfixed — which the index makes visible rather
-   than silent.
+_(Question 5, on when a move rewrites its inbound links, was answered lazy and
+is now decision 44.)_
 
 Resolved during the rev-7 review:
 
@@ -1593,9 +1604,30 @@ Resolved during the rev-7 review:
     also changes the character of the problem: a tombstone is a redirect left
     where a note used to be, while the index knows what points at a note before
     it moves, turning an unknowable blast radius into a listed one. It lives in
-    kb-priv because it necessarily names private notes, and it must be present
-    for a promotion to proceed — the same fail-closed coupling the denylist
-    already has.
+    kb-priv because it necessarily names private notes. Rev 9 coupled promotion
+    to the index being present, the same fail-closed shape the denylist has;
+    decision 44 relaxes that, because the record of a move survives the index
+    being offline.
+44. **The rewrite is lazy: a move is applied by each source's next
+    `lint --fix`, and git history is the record of last resort** (§6, §22, §24).
+    Dave's call, answering rev 9's open question 5. Eager rewriting keeps the
+    corpus consistent at every instant but writes into repos the mover was not
+    working in, which needs those trees clean and reproduces the "a scheduled
+    run and Dave in one working tree" problem §11 avoided by having curation
+    read snapshots. Lazy writes only to the repo being linted and makes a move
+    another migration rather than a second mechanism, which is decision 41's
+    machinery paying for itself twice. The window where a link is known-stale is
+    the cost, and it is bounded and visible: the index names the stale link, so
+    it is reported rather than silently wrong. Two things follow, and they are
+    what make lazy safe rather than merely cheap. The index stops being a
+    precondition for a move — a move made while kb-priv is not checked out is
+    recorded in git's rename detection, which is where the fix is recovered from
+    later, so the move is never lost even when nothing was there to log it. And
+    a link that resolves to nothing in either the index or history is escalated
+    for Dave to investigate rather than repaired by inference — lint's existing
+    split between the mechanically fixable and the ones needing judgment
+    (decision 41) already has the right shape for this, and a link with no
+    provenance for where its target went is squarely the second kind.
 
 ---
 
