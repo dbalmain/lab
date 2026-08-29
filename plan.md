@@ -1,6 +1,9 @@
 # Plan: shared knowledge base + agent project management
 
-Status: rev 12 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev
+Status: rev 13 · 2026-08-29 · authors: Claude (Opus 5, Fable 5), with Dave. Rev
+13 settles how the runner is driven: by the daemon and by whatever agent Dave is
+working in, which is one queue and a caller who may or may not wait rather than
+two run modes (decision 47). Rev
 12 puts a `Runner` boundary between dispatch and any particular agent CLI
 (§21.3, decision 46): `CliRunner` ships at P10, our own loop is the expected
 destination, and what defers it is metered-versus-subscription billing rather
@@ -1234,6 +1237,39 @@ outlives a call, an explicit cache-prefix marker, a usage record per turn — an
 interface that fits the CLIs comfortably is the wrong interface, because the
 whole point is to escape their limits.
 
+**Two callers, one path.** The runner must be drivable both by `lab-daemon`,
+picking up work as it becomes ready, and by whatever agent Dave happens to be
+working in — Claude Code today, grok another day. That is one mechanism, not
+two: **every dispatch is a ticket**, and the only difference is whether anyone
+is waiting on it. The daemon claims ready tickets on `auto` projects and nobody
+blocks; an interactive agent creates a ticket and then waits on it. So `Runner`
+is a library, `pm dispatch` is the CLI over it, and the daemon and an outer
+agent are both ordinary callers taking the same flock — the §21.1 rule that the
+daemon is a client and never a second write path, applied one level down.
+
+Four consequences worth stating before the code exists:
+
+- **An agent-driven dispatch returns a done-note, never a transcript.** The
+  result lands in the caller's context, so `offload-keeps-context-clean` becomes
+  a property of the interface rather than a discipline someone remembers: root
+  cause, what changed, gates claimed green, and a pointer to the run log for
+  anyone who wants more.
+- **The outer agent does not get to bypass the slot.** A dispatch into a project
+  whose single slot is busy queues or is refused; it never spawns a second
+  writer into the same tree (`never-two-writers-in-one-repo`). Refusal names the
+  ticket holding the slot.
+- **A run outlives the session that started it.** Because it is a ticket, an
+  interactive caller that dies leaves work that continues and lands in the
+  normal state machine, and a later session picks it up with `pm show`. Waiting
+  is a client behaviour, not a run mode.
+- **The ledger records who initiated.** A daemon schedule and an interactive
+  session are different cost shapes (§16.3), and separating them is the only way
+  to answer whether attended work is cheaper than unattended.
+
+The tool surface an outer agent uses is a module (§22.1) exposing dispatch,
+status and result, so capability grants come from the ticket rather than from
+whatever the calling agent happens to be allowed to do.
+
 **The expected destination is `NativeRunner`.** This is sequencing, not a hedge:
 the substrate — supervision, worktrees, ledger, the aven module layer — is
 identical under both, so none of it is wasted, and the call is deferred to when
@@ -1822,6 +1858,15 @@ Resolved during the rev-7 review:
     that number is open question 6. The interface is specified from what a
     native loop needs and lets `CliRunner` answer "unknown", because an
     interface that fits the CLIs comfortably is the wrong one.
+47. **Every dispatch is a ticket, whoever asked for it** (§21.3). Dave's
+    requirement: the runner is driven both by `lab-daemon` picking up ready work
+    and by whatever agent he is working in. Rather than two run modes, there is
+    one queue and a caller who may or may not wait — which keeps the slot
+    discipline, the state machine and the ledger identical for attended and
+    unattended work, and means an interactive session dying leaves a run that
+    still lands. It also makes `offload-keeps-context-clean` an interface
+    property: an agent-driven dispatch returns a done-note, because the result
+    is landing in the caller's context.
 
 ---
 
