@@ -397,7 +397,7 @@ proven by hand on real content before any machinery assumes it.
 description:
   A watcher that greps for a pattern present in its own command line matches
   itself and spins forever.
-type: lesson # lesson | reference | decision | howto | client | task | finding | position
+type: lesson # lesson | reference | decision | howto | style | client | task | finding | position
 scope: global # global | project:clex | client:acme
 confidence: high # high | medium | low
 asserted: 2026-07-22 # when this was last known true
@@ -422,6 +422,10 @@ Body: the fact, then `**Why:**`, then `**How to apply:**`. Link with `[[name]]`.
 Rules:
 
 - **One concept per note.** If the description needs an "and", it is two notes.
+  `style` is the one exempt type — a style guide is read whole and pointed at by
+  path (§10), so splitting it into forty notes destroys what makes it useful.
+  The type was added by P0 content: absorbing `~/style-guide` produced four
+  documents that are notes in every respect except this one.
 - **Edit over create.** Before writing, search for the note this should have
   been an edit to. Enforced on the write path (§9), not by good intentions.
 - **No note without provenance.**
