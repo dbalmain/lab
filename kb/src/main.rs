@@ -14,6 +14,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Check every note against the schema.
+    Lint {
+        /// The source to check.
+        #[arg(default_value = ".")]
+        root: PathBuf,
+        /// The schema data file.
+        #[arg(long, default_value = "schemas/note.toml")]
+        schema: PathBuf,
+    },
     /// Work with the schema itself.
     Schema {
         #[command(subcommand)]
@@ -40,10 +49,43 @@ enum SchemaCommand {
 
 fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::Lint { root, schema } => lint(&schema, &root),
         Command::Schema { command } => match command {
             SchemaCommand::Render { schema, out, check } => render(&schema, out, check),
         },
     }
+}
+
+fn lint(schema_path: &std::path::Path, root: &std::path::Path) -> Result<()> {
+    let schema = lab_schema::Schema::load(schema_path)?;
+    let today = jiff::Zoned::now().date();
+    let report = lab_lint::check(&schema, root, today)?;
+
+    for diagnostic in &report.diagnostics {
+        println!("{}", diagnostic.render(root));
+    }
+
+    // A rule that did not run is reported every time. A check nobody ran looks
+    // exactly like a check that passed, and the difference matters most on the
+    // day someone relies on it.
+    if !report.not_run.is_empty() {
+        println!(
+            "\nnot run (needs the kb-priv link index): {}",
+            report.not_run.join(", ")
+        );
+    }
+
+    println!(
+        "\n{} notes checked, {} errors, {} warnings",
+        report.notes_checked,
+        report.errors(),
+        report.warnings()
+    );
+
+    if report.errors() > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 fn render(schema_path: &std::path::Path, out: Option<PathBuf>, check: bool) -> Result<()> {

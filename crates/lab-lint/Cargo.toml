@@ -1,17 +1,20 @@
 [package]
-name = "kb"
+name = "lab-lint"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The knowledge base tool."
+description = "Checking a corpus of notes against a schema."
 
 [dependencies]
+lab-note.workspace = true
 lab-schema.workspace = true
-lab-lint.workspace = true
-jiff.workspace = true
 anyhow.workspace = true
-clap.workspace = true
+jiff.workspace = true
+serde_yaml_ng.workspace = true
+
+[dev-dependencies]
+jiff.workspace = true
 
 [lints]
 workspace = true
