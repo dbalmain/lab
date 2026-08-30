@@ -1,0 +1,15 @@
+[package]
+name = "kb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The knowledge base tool."
+
+[dependencies]
+lab-schema.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

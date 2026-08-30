@@ -1,36 +1,33 @@
 # lab
 
-Tools and infrastructure for orchestrating generative AI agents across projects.
+Tools for a knowledge base and a project management layer that generative agents
+can read from and write to. The vaults they operate on live in separate,
+private repos; this repo is the public half.
 
-## Contents
+- `crates/lab-schema` — the schema: a described set of fields and rules, plus the
+  renderer that produces `SCHEMA.md`
+- `kb` — the knowledge base tool
+- `schemas/` — the schema data files themselves
 
-- **`plan.md`** — System design: a knowledge base (KB) shared across projects,
-  and a project management (PM) layer that dispatches work to agents. Documents
-  governing principles, lifecycle, cost structure, and implementation phases.
-- **`token-report.py`** — Utility to read and report token usage from Claude and
-  Codex session logs. Retroactive instrumentation for cost accounting (no
-  configuration needed).
+`plan.md` is the design document and the record of what was decided and why.
 
 ## Building
 
-Phases P0–P13 are defined in `plan.md` §23. The system is not yet built; this
-repo will hold the Rust tools as they are implemented.
+```sh
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
 
-## Principles
+## The schema is data
 
-- Determinism belongs in scripts, not agents
-- State belongs in artefacts, not context
-- Evidence over assertion
-- The process is an experiment — measure and test assumptions
+Field and rule definitions live in `schemas/*.toml`, not in Rust. The schema is
+expected to move for a long time, and every consumer — the linter, `kb migrate`,
+and later the console's form renderer — reads the same description, so a field
+added to the data file is a field all three understand.
 
-See `plan.md` §2 for the full set.
+`kb/SCHEMA.md` in the knowledge base repo is generated from `schemas/note.toml`:
 
-## Measurement
-
-The system is designed to measure its own cost. Each dispatch records tokens and
-turns into a ledger. This repo includes `token-report.py` as the seed; grok
-token accounting is the instrumentation gap identified at P10.
-
-## License
-
-Public. See `plan.md` for copyright and attribution.
+```sh
+cargo run -p kb -- schema render --out ../kb/SCHEMA.md
+cargo run -p kb -- schema render --out ../kb/SCHEMA.md --check   # for CI
+```

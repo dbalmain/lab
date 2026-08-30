@@ -1,0 +1,293 @@
+# The note schema.
+#
+# `kb/SCHEMA.md` is GENERATED from this file by `kb schema render`. Edit here.
+#
+# The schema lives in the tools repo rather than in kb because eleven sources
+# share it (kb-priv/registry.toml), and a schema inside kb would make every
+# other source depend on kb being checked out — the dependency direction §4
+# forbids.
+
+[schema]
+name = "note"
+title = "Note schema"
+version = 1
+
+preamble = """
+The schema is expected to move throughout P0-P8. That is affordable because
+`kb lint --fix` and `kb migrate` apply a change across every note in every
+registered source, so a rename is a command rather than an afternoon.
+"""
+
+# ---------------------------------------------------------------------------
+# Fields
+# ---------------------------------------------------------------------------
+
+[[field]]
+name = "description"
+required = true
+kind = "text"
+doc = "One sentence, no trailing \"and\" — see the one-concept rule."
+
+[[field]]
+name = "type"
+required = true
+kind = "enum"
+values = [
+  "lesson",
+  "reference",
+  "decision",
+  "howto",
+  "guide",
+  "client",
+  "task",
+  "finding",
+  "position",
+]
+doc = "What kind of note this is. Drives which rules apply to it."
+
+[[field]]
+name = "scope"
+required = true
+kind = "pattern"
+pattern = "global|project:NAME|client:NAME"
+doc = "How far the note applies."
+
+[[field]]
+name = "confidence"
+required = true
+kind = "enum"
+values = ["high", "medium", "low"]
+doc = "How much weight a reader should give it."
+
+[[field]]
+name = "asserted"
+required = true
+kind = "date"
+doc = "ISO date this was last known true."
+
+[[field]]
+name = "source"
+required = true
+kind = "list"
+min = 1
+doc = "Where it came from. No note without provenance."
+
+[[field]]
+name = "triggers"
+required = true
+kind = "list"
+min = 1
+doc = "Imperative, in the reader's own words — what the reader is doing when they need this."
+
+# ---------------------------------------------------------------------------
+# Rules
+#
+# `check` names a built-in predicate; the set is closed until P10b (§22.1).
+# `check = "none"` marks a rule that is real guidance but cannot be mechanically
+# detected — see the honesty note in the Rules section below.
+# `fix` says whether `lint --fix` can repair a violation or only report it.
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "plain-scalar-colon"
+section = "frontmatter"
+severity = "error"
+check = "yaml_parses"
+fix = "report"
+title = "A plain YAML scalar cannot contain `: `."
+doc = """
+`description: Coding principles: gates, brevity` parses as a nested mapping and
+the note fails to load, silently in anything that catches the error. Use an em
+dash instead of the colon. Found by writing a description that broke the parser.
+"""
+
+[[rule]]
+id = "nothing-derivable"
+section = "frontmatter"
+severity = "error"
+check = "no_derivable_fields"
+fix = "fix"
+title = "Nothing is stored that can be derived."
+doc = """
+A note's **name** is its filename without the extension — searching names is
+the tool's job, not a duplicated field's. Its **visibility** is the visibility of
+the source it lives in: kb is public, kb-priv is private, and a project's notes
+inherit the `publication` of its registry entry. A `visibility: private` marker
+inside a public repo would describe a leak that has already happened, not
+prevent one.
+"""
+
+[[rule]]
+id = "one-concept"
+section = "rules"
+severity = "warn"
+check = "none"
+fix = "report"
+title = "One concept per note."
+doc = "If the description needs an \"and\", it is two notes."
+
+[[rule]]
+id = "consolidate-general-triggers"
+section = "rules"
+severity = "warn"
+check = "none"
+fix = "report"
+title = "Unless the trigger is general, and then consolidate."
+doc = """
+The counterweight to the rule above. The more often a trigger fires and the
+broader it is, the more the knowledge behind it belongs in one document rather
+than scattered across notes. `[[coding-style]]` fires on every line of code
+written and `[[testing]]` on every test, so each must carry everything needed for
+that task in one place — the alternative is fifteen retrieval hits the reader
+assembles by hand, every time, forever. `guide` is the type for that, and the
+only one exempt from one-concept-per-note; its description lists what it covers
+instead of stating one fact.
+"""
+
+[[rule]]
+id = "graduation"
+section = "rules"
+severity = "warn"
+check = "none"
+fix = "report"
+title = "A rule inside a guide graduates to a `lesson` only when its own trigger is narrower than the guide's."
+doc = """
+If it fires whenever you write code, it belongs in the guide. If it fires on a
+specific situation the guide's reader is not necessarily in, and getting it wrong
+has a failure mode, it is a lesson — and the guide keeps its own one-line
+phrasing rather than deferring to it.
+"""
+
+[[rule]]
+id = "lesson-inbound-link"
+section = "rules"
+severity = "error"
+check = "inbound_link"
+applies_to = ["lesson"]
+fix = "report"
+title = "Every `lesson` has an inbound link."
+doc = """
+A lesson nothing points at will not be found by the reader who needs it, since
+lessons are reached from related lessons as often as from a search. `guide` and
+`reference` notes are exempt — they are entry points, reached by trigger rather
+than by link.
+"""
+
+[[rule]]
+id = "edit-over-create"
+section = "rules"
+severity = "warn"
+check = "none"
+fix = "report"
+title = "Edit over create."
+doc = "Before writing, search for the note this should have been an edit to."
+
+[[rule]]
+id = "asserted-staleness"
+section = "rules"
+severity = "warn"
+check = "asserted_age"
+max_age_days = 90
+fix = "report"
+title = "`asserted` is not decoration."
+doc = "A note asserting tool behaviour older than ~90 days is flagged for recheck."
+
+[[rule]]
+id = "code-spans-are-not-links"
+section = "links"
+severity = "error"
+check = "strip_code_spans"
+fix = "fix"
+title = "A `[[...]]` inside a code span is not a link."
+doc = """
+Double brackets are bash syntax and appear in notes about shell. Lint must skip
+inline code and fenced blocks before resolving links.
+"""
+
+[[rule]]
+id = "local-link-resolves"
+section = "links"
+severity = "error"
+check = "link_resolves_local"
+fix = "fix"
+title = "`[[name]]` links within the same source and must resolve."
+doc = """
+This is the guarantee a lone clone needs, and lint fails on a break.
+"""
+
+[[rule]]
+id = "cross-source-link"
+section = "links"
+severity = "warn"
+check = "link_resolves_cross"
+fix = "report"
+title = "`[[source:name]]` crosses sources, where `source` is its registry name."
+doc = """
+`[[kb:monitors-self-match]]`, `[[pingone-aic-manager:token-refresh]]`. It
+resolves only where that source is checked out; lint warns when absent and never
+fails, because kb cannot depend on another repo existing.
+"""
+
+[[rule]]
+id = "public-links-public"
+section = "links"
+severity = "error"
+check = "publication_direction"
+fix = "report"
+title = "A public source may link only public sources."
+doc = "A private note's name inside a public link is itself a leak."
+
+[[rule]]
+id = "lazy-move-rewrite"
+section = "links"
+severity = "error"
+check = "pending_moves"
+fix = "fix"
+title = "A move is applied by the next `lint --fix`, not by the move itself."
+doc = """
+Every link is indexed in kb-priv, and a move rewrites its inbound links —
+lazily. The index spans all registered sources, so promoting or renaming a note
+updates what points at it rather than leaving a redirect behind. It also makes
+backlinks and link-weighted search possible, which a per-note redirect never
+would.
+
+Applying it lazily means a move never writes into a repo you were not working
+in, and a move made while kb-priv is not checked out is still recoverable —
+git's rename detection is the record of last resort. A link that resolves in
+neither the index nor history is reported for you to investigate, never guessed
+at.
+"""
+
+# ---------------------------------------------------------------------------
+# Prose sections — argument, not spec. Rendered in the order listed.
+# ---------------------------------------------------------------------------
+
+[[section]]
+id = "body"
+title = "Body"
+after = "frontmatter"
+doc = """
+The fact, then `**Why:**`, then `**How to apply:**`. Nothing else.
+
+The fact goes first because retrieval shows the opening lines and an agent that
+reads only those must still get the point. `Why` is what stops the lesson being
+cargo-culted into a case it does not fit. `How to apply` is the part that changes
+behaviour.
+"""
+
+[[section]]
+id = "detectability"
+title = "On rules that cannot be checked"
+after = "rules"
+doc = """
+A rule is only worth adding to the schema if its violation can be described
+precisely enough to detect — a useful discipline on the schema itself. The ones
+that fail that test are kept anyway, marked `check: none`, because they are still
+what a writer should be told. Marking them is the point: an unenforceable rule
+that looks enforceable is worse than one that admits it.
+
+Rules also divide into the mechanically fixable — a missing default, a renamed
+field, a link that needs its source prefix — and the ones needing judgment, such
+as a missing `source:`. Lint repairs the first kind and reports the second,
+rather than pretending both are errors of the same kind.
+"""
