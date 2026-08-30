@@ -53,6 +53,20 @@ pub struct Field {
     /// Minimum length, for `Kind::List`.
     #[serde(default)]
     pub min: Option<usize>,
+    /// Element kind, for `Kind::List`. A list of enums names its values in
+    /// `values`, exactly as a scalar enum does.
+    #[serde(default)]
+    pub of: Option<Kind>,
+}
+
+impl Field {
+    /// The kind of this field's elements: itself, unless it is a list.
+    pub fn element_kind(&self) -> Kind {
+        match self.kind {
+            Kind::List => self.of.unwrap_or(Kind::Text),
+            other => other,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -151,7 +165,15 @@ impl Schema {
     /// it at load rather than at read.
     fn validate(&self) -> Result<()> {
         for field in &self.field {
-            match field.kind {
+            if field.of.is_some() && field.kind != Kind::List {
+                anyhow::bail!("field `{}` is not a list, so `of` says nothing", field.name);
+            }
+            if field.of == Some(Kind::List) {
+                anyhow::bail!("field `{}` nests a list inside a list", field.name);
+            }
+            // An enum's values and a pattern's shape are checked against the
+            // ELEMENT kind, so `kind = "list", of = "enum"` needs values too.
+            match field.element_kind() {
                 Kind::Enum if field.values.is_empty() => {
                     anyhow::bail!("field `{}` is an enum with no values", field.name)
                 }
@@ -307,5 +329,43 @@ title = "Somewhere else."
         )
         .unwrap_err();
         assert!(err.to_string().contains("not one of"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+
+    fn parse(field: &str) -> Result<Schema> {
+        Schema::parse(&format!(
+            "[schema]\nname = \"t\"\ntitle = \"T\"\nversion = 1\n\n[[field]]\n{field}"
+        ))
+    }
+
+    #[test]
+    fn a_list_defaults_to_a_list_of_text() {
+        let schema = parse("name = \"xs\"\nrequired = true\nkind = \"list\"\n").unwrap();
+        assert_eq!(schema.field[0].element_kind(), Kind::Text);
+    }
+
+    #[test]
+    fn a_list_of_enums_needs_values() {
+        let err =
+            parse("name = \"xs\"\nrequired = true\nkind = \"list\"\nof = \"enum\"\n").unwrap_err();
+        assert!(err.to_string().contains("enum with no values"), "{err}");
+    }
+
+    #[test]
+    fn of_on_a_non_list_is_rejected() {
+        let err =
+            parse("name = \"x\"\nrequired = true\nkind = \"text\"\nof = \"date\"\n").unwrap_err();
+        assert!(err.to_string().contains("says nothing"), "{err}");
+    }
+
+    #[test]
+    fn a_list_of_lists_is_rejected() {
+        let err =
+            parse("name = \"xs\"\nrequired = true\nkind = \"list\"\nof = \"list\"\n").unwrap_err();
+        assert!(err.to_string().contains("nests a list"), "{err}");
     }
 }

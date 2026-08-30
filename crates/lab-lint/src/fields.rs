@@ -27,14 +27,14 @@ pub fn check(schema: &lab_schema::Schema, note: &Note, out: &mut Vec<Diagnostic>
         }
     }
 
-    let known: Vec<&str> = schema.field.iter().map(|f| f.name.as_str()).collect();
     for key in note.fields.keys() {
         let Some(name) = key.as_str() else {
             report(out, note, "a frontmatter key is not a string".to_string());
             continue;
         };
         // `name` and `visibility` get a rule of their own, with an explanation.
-        if !known.contains(&name) && !crate::DERIVABLE.contains(&name) {
+        let in_schema = schema.field.iter().any(|f| f.name == name);
+        if !in_schema && !crate::DERIVABLE.contains(&name) {
             report(
                 out,
                 note,
@@ -45,7 +45,15 @@ pub fn check(schema: &lab_schema::Schema, note: &Note, out: &mut Vec<Diagnostic>
 }
 
 fn check_value(field: &Field, value: &Value, note: &Note, out: &mut Vec<Diagnostic>) {
-    match field.kind {
+    check_as(field, field.kind, value, note, out);
+}
+
+/// Checks `value` against `kind`, which is the field's own kind for a scalar and
+/// its element kind for each entry of a list. Splitting these apart is what lets
+/// the schema describe a list of enums without the linter growing a second copy
+/// of the enum check.
+fn check_as(field: &Field, kind: Kind, value: &Value, note: &Note, out: &mut Vec<Diagnostic>) {
+    match kind {
         Kind::Text => {
             if value.as_str().is_none() {
                 report(
@@ -122,16 +130,8 @@ fn check_value(field: &Field, value: &Value, note: &Note, out: &mut Vec<Diagnost
                         ),
                     );
                 }
-                if let Some(bad) = items.iter().find(|i| i.as_str().is_none()) {
-                    report(
-                        out,
-                        note,
-                        format!(
-                            "`{}` contains {}, but every entry must be text",
-                            field.name,
-                            describe(bad)
-                        ),
-                    );
+                for item in items {
+                    check_as(field, field.element_kind(), item, note, out);
                 }
             }
             None => report(
@@ -147,9 +147,6 @@ fn check_value(field: &Field, value: &Value, note: &Note, out: &mut Vec<Diagnost
     }
 }
 
-/// The pattern language is deliberately tiny: alternatives separated by `|`,
-/// where `NAME` stands for a non-empty segment. Anything richer would be the
-/// expression language P1 is specified not to have.
 fn matches_pattern(field: &Field, actual: &str) -> bool {
     let Some(pattern) = field.pattern.as_deref() else {
         return true;
@@ -174,4 +171,95 @@ fn report(out: &mut Vec<Diagnostic>, note: &Note, message: String) {
         severity: Severity::Error,
         message,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use lab_note::Note;
+    use lab_schema::Schema;
+
+    use crate::Diagnostic;
+
+    /// A schema with a list of enums — the case the shipped note schema does not
+    /// exercise, and the one a hardcoded list-of-text check gets wrong.
+    fn schema() -> Schema {
+        Schema::parse(
+            r#"
+[schema]
+name = "t"
+title = "T"
+version = 1
+
+[[field]]
+name = "labels"
+required = true
+kind = "list"
+of = "enum"
+min = 1
+values = ["bug", "chore"]
+
+[[field]]
+name = "seen"
+required = false
+kind = "list"
+of = "date"
+"#,
+        )
+        .expect("test schema")
+    }
+
+    fn diagnose(front: &str) -> Vec<String> {
+        let text = format!("---\n{front}---\n\nBody.\n");
+        let note = Note::parse(Path::new("x/a.md"), &text)
+            .ok()
+            .expect("parses");
+        let mut out: Vec<Diagnostic> = Vec::new();
+        super::check(&schema(), &note, &mut out);
+        out.into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_list_of_valid_enums_passes() {
+        assert!(diagnose("labels:\n  - bug\n  - chore\n").is_empty());
+    }
+
+    /// The discriminating case: a list of text and a list of enums are
+    /// indistinguishable until an entry is outside the enum.
+    #[test]
+    fn an_entry_outside_the_enum_is_reported() {
+        let found = diagnose("labels:\n  - bug\n  - nonsense\n");
+        assert!(found.iter().any(|m| m.contains("`nonsense`")), "{found:?}");
+    }
+
+    #[test]
+    fn an_entry_of_the_wrong_element_type_is_reported() {
+        let found = diagnose("labels:\n  - bug\nseen:\n  - not-a-date\n");
+        assert!(
+            found.iter().any(|m| m.contains("not an ISO date")),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_list_shorter_than_min_is_reported() {
+        let found = diagnose("labels: []\n");
+        assert!(found.iter().any(|m| m.contains("at least 1")), "{found:?}");
+    }
+
+    #[test]
+    fn a_scalar_where_a_list_belongs_is_reported() {
+        let found = diagnose("labels: bug\n");
+        assert!(
+            found.iter().any(|m| m.contains("must be a list")),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_field_not_in_the_schema_is_reported() {
+        let found = diagnose("labels:\n  - bug\nmystery: yes\n");
+        assert!(found.iter().any(|m| m.contains("`mystery`")), "{found:?}");
+    }
 }

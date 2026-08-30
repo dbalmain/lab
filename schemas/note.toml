@@ -69,6 +69,7 @@ doc = "ISO date this was last known true."
 name = "source"
 required = true
 kind = "list"
+of = "text"
 min = 1
 doc = "Where it came from. No note without provenance."
 
@@ -76,6 +77,7 @@ doc = "Where it came from. No note without provenance."
 name = "triggers"
 required = true
 kind = "list"
+of = "text"
 min = 1
 doc = "Imperative, in the reader's own words — what the reader is doing when they need this."
 

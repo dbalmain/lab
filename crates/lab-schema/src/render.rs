@@ -103,9 +103,21 @@ fn values_cell(field: &Field) -> String {
             join_doc(&shape, &field.doc)
         }
         Kind::List => {
+            let element = match field.element_kind() {
+                Kind::Text => "text".to_string(),
+                Kind::Date => "ISO dates".to_string(),
+                Kind::Enum => field
+                    .values
+                    .iter()
+                    .map(|v| format!("`{v}`"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                Kind::Pattern => format!("`{}`", field.pattern.as_deref().unwrap_or_default()),
+                Kind::List => "lists".to_string(),
+            };
             let shape = match field.min {
-                Some(min) if min > 0 => format!("list, at least {min}"),
-                _ => "list".to_string(),
+                Some(min) if min > 0 => format!("list of {element}, at least {min}"),
+                _ => format!("list of {element}"),
             };
             join_doc(&shape, &field.doc)
         }
